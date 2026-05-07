@@ -1,0 +1,95 @@
+version: crawlwall.io/v1
+
+site:
+  id: local-dev
+  host: localhost
+  mode: enforce
+
+runtime:
+  fail_mode: block
+  default_action:
+    type: allow
+
+ledger:
+  enabled: true
+  sample_humans: false
+  write_body_hash: false
+
+receipts:
+  enabled: false
+
+bots:
+  - id: googlebot
+    name: Googlebot
+    class: search
+    match:
+      user_agents:
+        - "Googlebot"
+    verify:
+      type: reverse_dns
+      allowed_suffixes:
+        - ".googlebot.com"
+        - ".google.com"
+
+  - id: gptbot
+    name: GPTBot
+    class: ai_training
+    match:
+      user_agents:
+        - "GPTBot"
+    verify:
+      type: ip_ranges
+      sources:
+        - "https://openai.com/gptbot.json"
+      refresh: 1h
+      stale_action: fail_closed
+      max_stale: 0s
+
+  - id: unknown
+    name: Unknown
+    class: unknown
+    match:
+      default: true
+    verify:
+      type: none
+
+sets:
+  protected_paths:
+    - "/archive"
+    - "/datasets"
+    - "/reports"
+
+rules:
+  - id: block_spoofed_known_bots
+    priority: 10
+    when: >
+      bot.claimed && !bot.verified
+    action:
+      type: block
+      status: 403
+      reason: spoofed_bot
+  - id: allow_verified_search
+    priority: 100
+    when: >
+      bot.verified && bot.class == "search"
+    action:
+      type: allow
+
+  - id: rate_limit_verified_training
+    priority: 300
+    when: >
+      bot.verified && bot.class == "ai_training"
+    action:
+      type: rate_limit
+      limit:
+        key: "bot.id"
+        rpm: 120
+  - id: block_unknown_protected_paths
+    priority: 900
+    when: >
+      bot.class == "unknown" &&
+      sets.protected_paths.exists(p, request.path.startsWith(p))
+    action:
+      type: block
+      status: 403
+      reason: unknown_crawler_protected_path

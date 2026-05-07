@@ -1,0 +1,14 @@
+{
+	auto_https off
+	order crawlwall before reverse_proxy
+}
+
+:8080 {
+	crawlwall {
+		policy ./crawlwall.yaml
+		ledger sqlite://./crawlwall.db
+		fail_mode block
+	}
+
+	reverse_proxy localhost:3000
+}

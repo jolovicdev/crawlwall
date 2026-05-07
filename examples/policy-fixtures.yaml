@@ -1,0 +1,27 @@
+fixtures:
+  - name: unknown crawler is blocked from protected path
+    request:
+      user_agent: "curl/8.0"
+      path: "/archive/a"
+      ip: "198.51.100.10"
+    expect:
+      bot_id: unknown
+      bot_class: unknown
+      verified: false
+      rule_id: block_unknown_protected_paths
+      action: block
+      reason: unknown_crawler_protected_path
+      status: 403
+
+  - name: unknown crawler is allowed on public path
+    request:
+      user_agent: "curl/8.0"
+      path: "/public/a"
+      ip: "198.51.100.10"
+    expect:
+      bot_id: unknown
+      bot_class: unknown
+      verified: false
+      rule_id: runtime.default_action
+      action: allow
+      status: 200

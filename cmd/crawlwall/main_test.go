@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestInitWritesMinimalScaffold(t *testing.T) {
@@ -164,6 +165,16 @@ rules:
 
 	if err := runVerifiers(context.Background(), []string{"status", "--config", configPath}); err != nil {
 		t.Fatalf("runVerifiers(status) error = %v", err)
+	}
+}
+
+func TestParseRetentionDurationSupportsDays(t *testing.T) {
+	duration, err := parseRetentionDuration("30d")
+	if err != nil {
+		t.Fatalf("parseRetentionDuration() error = %v", err)
+	}
+	if duration != 30*24*time.Hour {
+		t.Fatalf("parseRetentionDuration() = %s, want 720h", duration)
 	}
 }
 

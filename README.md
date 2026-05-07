@@ -575,6 +575,7 @@ go run ./cmd/crawlwall policy test \
 go run ./cmd/crawlwall verifiers status --config ./crawlwall.yaml
 go run ./cmd/crawlwall ledger report --db ./crawlwall.db --since 24h
 go run ./cmd/crawlwall ledger export --db ./crawlwall.db --format jsonl
+go run ./cmd/crawlwall ledger vacuum --db ./crawlwall.db --older-than 30d
 go run ./cmd/crawlwall receipts verify \
   --file ./ledger-export.jsonl --public-key ./crawlwall.pub
 ```
@@ -588,6 +589,7 @@ Useful split:
 - `verifiers status`: show IP range verifier cache health
 - `ledger report`: summarize observed traffic
 - `ledger export`: dump the event log
+- `ledger vacuum`: delete old events and compact the SQLite file
 - `receipts verify`: validate signed receipt output
 
 ## Project layout
@@ -622,6 +624,7 @@ Included in V1:
 - verifier cache status checks
 - shadow mode for dry-run policy rollout
 - SQLite ledger
+- ledger retention cleanup
 - signed receipts
 - local reporting and export
 - policy fixture tests

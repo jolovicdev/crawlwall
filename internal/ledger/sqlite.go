@@ -169,6 +169,26 @@ func (l *sqliteLedger) ExportJSONL(ctx context.Context, w io.Writer) error {
 	return rows.Err()
 }
 
+func (l *sqliteLedger) Prune(ctx context.Context, before time.Time) (int64, error) {
+	result, err := l.db.ExecContext(ctx, `
+		DELETE FROM crawl_events
+		WHERE ts < ?
+	`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	if _, err := l.db.ExecContext(ctx, `VACUUM`); err != nil {
+		return deleted, err
+	}
+	return deleted, nil
+}
+
 func (l *sqliteLedger) Close() error {
 	return l.db.Close()
 }

@@ -466,6 +466,37 @@ func runLedger(ctx context.Context, args []string) error {
 		defer led.Close()
 
 		return led.ExportJSONL(ctx, os.Stdout)
+	case "vacuum":
+		fs := flag.NewFlagSet("ledger vacuum", flag.ContinueOnError)
+		dbPath := fs.String("db", "./crawlwall.db", "sqlite database path")
+		olderThan := fs.String("older-than", "", "delete events older than this duration, for example 720h or 30d")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if strings.TrimSpace(*olderThan) == "" {
+			return fmt.Errorf("--older-than is required")
+		}
+
+		duration, err := parseRetentionDuration(*olderThan)
+		if err != nil {
+			return err
+		}
+		if duration <= 0 {
+			return fmt.Errorf("--older-than must be positive")
+		}
+
+		led, err := ledger.Open("sqlite://"+strings.TrimPrefix(*dbPath, "sqlite://"), true)
+		if err != nil {
+			return err
+		}
+		defer led.Close()
+
+		deleted, err := led.Prune(ctx, time.Now().Add(-duration))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("ledger vacuum deleted %d events older than %s\n", deleted, duration)
+		return nil
 	default:
 		return fmt.Errorf("unknown ledger command %q", args[0])
 	}
@@ -645,6 +676,18 @@ func defaultString(value, fallback string) string {
 	return value
 }
 
+func parseRetentionDuration(value string) (time.Duration, error) {
+	trimmed := strings.TrimSpace(value)
+	if strings.HasSuffix(trimmed, "d") {
+		days, err := time.ParseDuration(strings.TrimSuffix(trimmed, "d") + "h")
+		if err != nil {
+			return 0, err
+		}
+		return days * 24, nil
+	}
+	return time.ParseDuration(trimmed)
+}
+
 func formatOptionalTime(value time.Time) string {
 	if value.IsZero() {
 		return "-"
@@ -661,6 +704,7 @@ func usage() {
   crawlwall verifiers status --config ./crawlwall.yaml
   crawlwall ledger report --db ./crawlwall.db --since 24h
   crawlwall ledger export --db ./crawlwall.db --format jsonl
+  crawlwall ledger vacuum --db ./crawlwall.db --older-than 30d
   crawlwall receipts verify --file receipts.jsonl --public-key crawlwall.pub`)
 }
 

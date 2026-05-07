@@ -31,10 +31,15 @@ type Exporter interface {
 	ExportJSONL(context.Context, io.Writer) error
 }
 
+type Pruner interface {
+	Prune(context.Context, time.Time) (int64, error)
+}
+
 type Ledger interface {
 	EventWriter
 	Reporter
 	Exporter
+	Pruner
 }
 
 type Event struct {
@@ -175,6 +180,9 @@ func (noopLedger) Report(context.Context, time.Time) ([]ReportRow, error) {
 }
 func (noopLedger) ExportJSONL(context.Context, io.Writer) error { return nil }
 func (noopLedger) Close() error                                 { return nil }
+func (noopLedger) Prune(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
 
 func ParseExportLine(line []byte) (*ExportRecord, error) {
 	var exportRecord ExportRecord

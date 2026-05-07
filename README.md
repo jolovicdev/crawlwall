@@ -465,6 +465,9 @@ This is the standard pattern used for bots like Googlebot:
 3. resolve the PTR hostname back to A/AAAA
 4. require the original IP to be present
 
+Completed reverse-DNS decisions are cached per IP for five minutes to avoid
+doing PTR and forward lookups on every request from a claimed crawler.
+
 ### `ip_ranges`
 
 This is the simpler model for bots that publish source ranges:

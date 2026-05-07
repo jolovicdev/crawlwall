@@ -42,6 +42,9 @@ type Envelope struct {
 	Signature string  `json:"signature"`
 }
 
+// Receipt payloads intentionally use only structs, strings, numbers, booleans,
+// and slices. Do not add map fields without replacing json.Marshal with a
+// canonical sorted encoder, or old signatures may stop verifying.
 func CanonicalBytes(payload Payload) ([]byte, error) {
 	return json.Marshal(payload)
 }

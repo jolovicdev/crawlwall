@@ -113,7 +113,7 @@ location.
 | --- | --- |
 | 1 | Read `User-Agent` and identify the claimed crawler |
 | 2 | Verify the request source according to that crawler's verifier |
-| 3 | Build the policy input: `bot`, `request`, `site`, `sets`, `counters` |
+| 3 | Build the policy input: `bot`, `request`, `site`, `sets`, `labels` |
 | 4 | Evaluate rules by ascending priority |
 | 5 | Enforce the first matching action |
 | 6 | If requested, sign a receipt over the stable event ID |
@@ -328,8 +328,6 @@ runtime:
 
 ledger:
   enabled: true
-  sample_humans: false
-  write_body_hash: false
 
 receipts:
   enabled: true

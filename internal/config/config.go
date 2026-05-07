@@ -23,9 +23,7 @@ type RuntimeConfig struct {
 }
 
 type LedgerConfig struct {
-	Enabled       bool `yaml:"enabled"`
-	SampleHumans  bool `yaml:"sample_humans"`
-	WriteBodyHash bool `yaml:"write_body_hash"`
+	Enabled bool `yaml:"enabled"`
 }
 
 type ReceiptsConfig struct {

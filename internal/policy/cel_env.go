@@ -8,7 +8,6 @@ func newEnv() (*cel.Env, error) {
 		cel.Variable("request", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("site", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("sets", cel.MapType(cel.StringType, cel.DynType)),
-		cel.Variable("counters", cel.MapType(cel.StringType, cel.DynType)),
-		cel.Variable("license", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("labels", cel.MapType(cel.StringType, cel.DynType)),
 	)
 }

@@ -3,7 +3,7 @@
 CrawlWall policies are YAML files with CEL expressions in `rules[].when`.
 You do not need to learn all of CEL to use CrawlWall. You need a small set of
 boolean expressions over the request, bot identity, site metadata, reusable
-sets, and counters.
+sets, and labels.
 
 ## Rule Shape
 
@@ -79,7 +79,7 @@ Start production policy changes in `shadow`, inspect the ledger, then switch to
 | `request.user_agent` | string | User-Agent header |
 | `request.headers` | map | Lowercase request headers |
 
-### `site`, `sets`, and `counters`
+### `site`, `sets`, and `labels`
 
 `site` contains `id`, `host`, and `mode`.
 
@@ -92,13 +92,13 @@ sets:
     - "/datasets"
 ```
 
-`counters` currently exposes basic request grouping fields:
+`labels` exposes request grouping fields. These are labels, not live counters:
 
 | Name | Meaning |
 | --- | --- |
-| `counters.bot_id` | Identified bot ID |
-| `counters.host` | Request host |
-| `counters.path` | Request path |
+| `labels.bot_id` | Identified bot ID |
+| `labels.host` | Request host |
+| `labels.path` | Request path |
 
 ## CEL Basics
 

@@ -103,8 +103,8 @@ func (e *Engine) SetsInput() map[string]any {
 	return cloneMap(e.sets)
 }
 
-func (e *Engine) CountersInput(identified bot.Identified, r *http.Request) map[string]any {
-	return DefaultCountersInput(identified, r)
+func (e *Engine) LabelsInput(identified bot.Identified, r *http.Request) map[string]any {
+	return DefaultLabelsInput(identified, r)
 }
 
 func (e *Engine) normalizedAction(action config.Action) config.Action {

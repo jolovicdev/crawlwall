@@ -155,10 +155,9 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			UserAgent: r.UserAgent(),
 			Headers:   headersToMap(r.Header),
 		},
-		Site:     m.policy.SiteInput(),
-		Sets:     m.policy.SetsInput(),
-		Counters: m.policy.CountersInput(identifiedBot, r),
-		License:  map[string]any{},
+		Site:   m.policy.SiteInput(),
+		Sets:   m.policy.SetsInput(),
+		Labels: m.policy.LabelsInput(identifiedBot, r),
 	}
 
 	decision, evalErr := m.policy.Evaluate(input)

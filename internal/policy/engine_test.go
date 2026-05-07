@@ -54,10 +54,9 @@ func TestEvaluateReturnsMeteredDecisionForVerifiedTrainingBotOnProtectedPath(t *
 		Request: RequestInput{
 			Path: "/archive/page-a",
 		},
-		Site:     engine.SiteInput(),
-		Sets:     engine.SetsInput(),
-		Counters: map[string]any{},
-		License:  map[string]any{},
+		Site:   engine.SiteInput(),
+		Sets:   engine.SetsInput(),
+		Labels: map[string]any{},
 	})
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
@@ -107,12 +106,11 @@ func TestEvaluateReturnsErrorForRuntimeCELError(t *testing.T) {
 	}
 
 	_, err = engine.Evaluate(Input{
-		Bot:      BotInput{ID: "unknown", Class: "unknown"},
-		Request:  RequestInput{Path: "/archive/page-a"},
-		Site:     engine.SiteInput(),
-		Sets:     engine.SetsInput(),
-		Counters: map[string]any{},
-		License:  map[string]any{},
+		Bot:     BotInput{ID: "unknown", Class: "unknown"},
+		Request: RequestInput{Path: "/archive/page-a"},
+		Site:    engine.SiteInput(),
+		Sets:    engine.SetsInput(),
+		Labels:  map[string]any{},
 	})
 	if err == nil {
 		t.Fatalf("Evaluate() error = nil, want runtime CEL error")

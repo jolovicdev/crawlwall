@@ -410,8 +410,6 @@ runtime:
 
 ledger:
   enabled: true
-  sample_humans: false
-  write_body_hash: false
 
 receipts:
   enabled: true

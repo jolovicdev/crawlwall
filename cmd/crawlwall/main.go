@@ -260,10 +260,9 @@ func evaluatePolicy(ctx context.Context, cfg *config.Config, req policyEvalReque
 			UserAgent: req.UserAgent,
 			Headers:   map[string]string{},
 		},
-		Site:     engine.SiteInput(),
-		Sets:     engine.SetsInput(),
-		Counters: map[string]any{},
-		License:  map[string]any{},
+		Site:   engine.SiteInput(),
+		Sets:   engine.SetsInput(),
+		Labels: map[string]any{},
 	}
 
 	decision, err := engine.Evaluate(input)

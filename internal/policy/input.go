@@ -9,22 +9,20 @@ import (
 )
 
 type Input struct {
-	Bot      BotInput
-	Request  RequestInput
-	Site     map[string]any
-	Sets     map[string]any
-	Counters map[string]any
-	License  map[string]any
+	Bot     BotInput
+	Request RequestInput
+	Site    map[string]any
+	Sets    map[string]any
+	Labels  map[string]any
 }
 
 func (i Input) Vars() map[string]any {
 	return map[string]any{
-		"bot":      i.Bot.Map(),
-		"request":  i.Request.Map(),
-		"site":     i.Site,
-		"sets":     i.Sets,
-		"counters": i.Counters,
-		"license":  i.License,
+		"bot":     i.Bot.Map(),
+		"request": i.Request.Map(),
+		"site":    i.Site,
+		"sets":    i.Sets,
+		"labels":  i.Labels,
 	}
 }
 
@@ -93,7 +91,7 @@ func ResolvePath(vars map[string]any, path string) string {
 	return fmt.Sprint(current)
 }
 
-func DefaultCountersInput(identified bot.Identified, r *http.Request) map[string]any {
+func DefaultLabelsInput(identified bot.Identified, r *http.Request) map[string]any {
 	return map[string]any{
 		"bot_id": identified.ID,
 		"host":   r.Host,

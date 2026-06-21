@@ -32,7 +32,6 @@ type BotInput struct {
 	Class    string
 	Claimed  bool
 	Verified bool
-	Signed   bool
 	Operator string
 }
 
@@ -43,7 +42,6 @@ func (b BotInput) Map() map[string]any {
 		"class":    b.Class,
 		"claimed":  b.Claimed,
 		"verified": b.Verified,
-		"signed":   b.Signed,
 		"operator": b.Operator,
 	}
 }

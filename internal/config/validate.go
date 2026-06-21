@@ -117,6 +117,39 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// resolvableLimitKeys mirrors the policy input shape (see internal/policy input
+// and labels). A limit.key that does not resolve would silently collapse every
+// request into one shared bucket, so unknown keys are rejected at load time.
+var resolvableLimitKeys = map[string]struct{}{
+	"bot.id":             {},
+	"bot.name":           {},
+	"bot.class":          {},
+	"bot.claimed":        {},
+	"bot.verified":       {},
+	"bot.operator":       {},
+	"request.host":       {},
+	"request.method":     {},
+	"request.path":       {},
+	"request.query":      {},
+	"request.ip":         {},
+	"request.user_agent": {},
+	"site.id":            {},
+	"site.host":          {},
+	"site.mode":          {},
+	"labels.bot_id":      {},
+	"labels.host":        {},
+	"labels.path":        {},
+}
+
+func isResolvableLimitKey(key string) bool {
+	if _, ok := resolvableLimitKeys[key]; ok {
+		return true
+	}
+	// Any single request header, for example request.headers.cf-connecting-ip.
+	const headerPrefix = "request.headers."
+	return strings.HasPrefix(key, headerPrefix) && len(key) > len(headerPrefix)
+}
+
 func validateAction(scope string, action Action) error {
 	switch action.Type {
 	case ActionAllow:
@@ -136,6 +169,9 @@ func validateAction(scope string, action Action) error {
 		}
 		if strings.TrimSpace(action.Limit.Key) == "" {
 			return fmt.Errorf("%s: rate_limit limit.key is required", scope)
+		}
+		if !isResolvableLimitKey(action.Limit.Key) {
+			return fmt.Errorf("%s: rate_limit limit.key %q does not reference a known input path", scope, action.Limit.Key)
 		}
 		if action.Limit.RPM <= 0 {
 			return fmt.Errorf("%s: rate_limit limit.rpm must be positive", scope)

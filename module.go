@@ -151,7 +151,6 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			Class:    identifiedBot.Class,
 			Claimed:  identifiedBot.Claimed,
 			Verified: verification.Verified,
-			Signed:   false,
 			Operator: identifiedBot.Operator,
 		},
 		Request: policy.RequestInput{

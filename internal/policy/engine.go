@@ -59,12 +59,24 @@ func (e *Engine) Evaluate(input Input) (Decision, error) {
 
 		return Decision{
 			RuleID: rule.ID,
-			Action: rule.Action,
+			Action: actionWithOwnedLimit(rule.Action),
 			Audit:  rule.Audit,
 		}, nil
 	}
 
 	return e.DefaultDecision(), nil
+}
+
+// actionWithOwnedLimit returns a copy of action whose Limit pointer is private
+// to the returned decision. ServeHTTP resolves Limit.ResolvedKey per request,
+// so the pointer must not be shared across the concurrent requests matching a
+// rule.
+func actionWithOwnedLimit(action config.Action) config.Action {
+	if action.Limit != nil {
+		limitCopy := *action.Limit
+		action.Limit = &limitCopy
+	}
+	return action
 }
 
 func (e *Engine) DefaultDecision() Decision {

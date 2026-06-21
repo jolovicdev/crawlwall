@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -66,6 +67,78 @@ func TestIPRangesVerifierCanUseBoundedStaleCache(t *testing.T) {
 	if !result.Verified || result.Reason != "ip_range_match_stale" {
 		t.Fatalf("stale Verify() = %+v, want stale match", result)
 	}
+}
+
+func TestIPRangesVerifierSingleflightsConcurrentFetches(t *testing.T) {
+	var hits int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		time.Sleep(100 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"prefixes":[{"ipv4Prefix":"20.0.0.0/24"}]}`))
+	}))
+	defer server.Close()
+
+	verifier := newIPRangesVerifier(config.VerifyConfig{
+		Sources: []string{server.URL},
+		Refresh: "1h",
+	}, zap.NewNop()).(*ipRangesVerifier)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := verifier.Verify(context.Background(), net.ParseIP("20.0.0.5")); err != nil {
+				t.Errorf("Verify() error = %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("source fetched %d times, want 1 (singleflight should dedupe)", got)
+	}
+}
+
+func TestServiceBackgroundRefreshUpdatesCache(t *testing.T) {
+	var payload atomic.Value
+	payload.Store(`{"prefixes":[{"ipv4Prefix":"20.0.0.0/24"}]}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload.Load().(string)))
+	}))
+	defer server.Close()
+
+	svc := NewService([]config.BotConfig{{
+		ID:    "gptbot",
+		Name:  "GPTBot",
+		Class: "ai_training",
+		Verify: config.VerifyConfig{
+			Type:    "ip_ranges",
+			Sources: []string{server.URL},
+			Refresh: "60ms",
+		},
+	}}, zap.NewNop())
+	svc.Start()
+	defer svc.Stop()
+
+	// Warm-up is asynchronous now; the first Verify falls back to an inline
+	// single-flighted fetch, so it still resolves the initial range.
+	result, err := svc.verifiers["gptbot"].Verify(context.Background(), net.ParseIP("20.0.0.5"))
+	if err != nil || !result.Verified {
+		t.Fatalf("first Verify() = %+v, err = %v", result, err)
+	}
+
+	payload.Store(`{"prefixes":[{"ipv4Prefix":"30.0.0.0/24"}]}`)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if res, _ := svc.verifiers["gptbot"].Verify(context.Background(), net.ParseIP("30.0.0.5")); res.Verified {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("background refresh did not pick up the rotated range")
 }
 
 func newFlakyIPRangeSource(t *testing.T) (string, *atomic.Bool) {

@@ -32,7 +32,7 @@ func openSQLite(dsn string) (Ledger, error) {
 		return nil, fmt.Errorf("sqlite ledger path is required")
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", sqliteConnString(path))
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +49,23 @@ func openSQLite(dsn string) (Ledger, error) {
 	return &sqliteLedger{db: db}, nil
 }
 
+// sqliteConnString adds per-connection pragmas. WAL plus a busy timeout lets
+// the request-path writers wait briefly for the lock instead of dropping events
+// with SQLITE_BUSY under concurrency.
+func sqliteConnString(path string) string {
+	pragmas := []string{
+		"_pragma=busy_timeout(5000)",
+		"_pragma=journal_mode(WAL)",
+		"_pragma=synchronous(NORMAL)",
+		"_pragma=foreign_keys(ON)",
+	}
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + strings.Join(pragmas, "&")
+}
+
 func (l *sqliteLedger) WriteEvent(ctx context.Context, event Event) error {
 	if event.EventID == "" {
 		event.EventID = newEventID()
@@ -62,8 +79,8 @@ func (l *sqliteLedger) WriteEvent(ctx context.Context, event Event) error {
 			rule_id, action, action_reason,
 			status, bytes_sent, duration_ms,
 			price_amount, price_currency, price_unit,
-			receipt_id, receipt_signature
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			receipt_id, receipt_signature, enforced
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		event.EventID,
 		event.TS.Format(time.RFC3339),
@@ -92,6 +109,7 @@ func (l *sqliteLedger) WriteEvent(ctx context.Context, event Event) error {
 		event.PriceUnit,
 		event.ReceiptID,
 		event.ReceiptSignature,
+		event.Enforced,
 	)
 	return err
 }
@@ -104,8 +122,9 @@ func (l *sqliteLedger) Report(ctx context.Context, since time.Time) ([]ReportRow
 			bot_class,
 			MAX(bot_verified) AS verified,
 			COUNT(*) AS requests,
-			SUM(CASE WHEN action IN ('allow', 'rate_limit') AND status < 400 THEN 1 ELSE 0 END) AS allowed,
-			SUM(CASE WHEN action IN ('block', 'rate_limit_exceeded') OR status >= 400 THEN 1 ELSE 0 END) AS blocked,
+			SUM(CASE WHEN action IN ('allow', 'rate_limit') AND enforced = 0 THEN 1 ELSE 0 END) AS allowed,
+			SUM(CASE WHEN enforced = 1 THEN 1 ELSE 0 END) AS blocked,
+			SUM(CASE WHEN action IN ('block', 'rate_limit_exceeded') AND enforced = 0 THEN 1 ELSE 0 END) AS would_block,
 			SUM(CASE WHEN action = 'allow_metered' THEN 1 ELSE 0 END) AS metered
 		FROM crawl_events
 		WHERE ts >= ?
@@ -120,7 +139,7 @@ func (l *sqliteLedger) Report(ctx context.Context, since time.Time) ([]ReportRow
 	var report []ReportRow
 	for rows.Next() {
 		var row ReportRow
-		if err := rows.Scan(&row.BotID, &row.BotName, &row.Class, &row.Verified, &row.Requests, &row.Allowed, &row.Blocked, &row.Metered); err != nil {
+		if err := rows.Scan(&row.BotID, &row.BotName, &row.Class, &row.Verified, &row.Requests, &row.Allowed, &row.Blocked, &row.WouldBlock, &row.Metered); err != nil {
 			return nil, err
 		}
 		report = append(report, row)
@@ -137,7 +156,7 @@ func (l *sqliteLedger) ExportJSONL(ctx context.Context, w io.Writer) error {
 			rule_id, action, action_reason,
 			status, bytes_sent, duration_ms,
 			price_amount, price_currency, price_unit,
-			receipt_id, receipt_signature
+			receipt_id, receipt_signature, enforced
 		FROM crawl_events
 		ORDER BY id ASC
 	`)
@@ -231,6 +250,7 @@ func scanEvent(scanner interface{ Scan(dest ...any) error }) (Event, error) {
 		&priceUnit,
 		&receiptID,
 		&receiptSignature,
+		&event.Enforced,
 	)
 	if err != nil {
 		return Event{}, err
@@ -266,17 +286,26 @@ func ensureSQLiteMigrations(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if hasEventID {
-		_, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_crawl_events_event_id ON crawl_events(event_id)`)
+	if !hasEventID {
+		if _, err := db.Exec(`
+			ALTER TABLE crawl_events ADD COLUMN event_id TEXT;
+			UPDATE crawl_events SET event_id = 'legacy-' || id WHERE event_id IS NULL OR event_id = '';
+		`); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_crawl_events_event_id ON crawl_events(event_id)`); err != nil {
 		return err
 	}
 
-	if _, err := db.Exec(`
-		ALTER TABLE crawl_events ADD COLUMN event_id TEXT;
-		UPDATE crawl_events SET event_id = 'legacy-' || id WHERE event_id IS NULL OR event_id = '';
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_crawl_events_event_id ON crawl_events(event_id);
-	`); err != nil {
+	hasEnforced, err := sqliteColumnExists(db, "crawl_events", "enforced")
+	if err != nil {
 		return err
+	}
+	if !hasEnforced {
+		if _, err := db.Exec(`ALTER TABLE crawl_events ADD COLUMN enforced BOOLEAN NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
 	}
 	return nil
 }

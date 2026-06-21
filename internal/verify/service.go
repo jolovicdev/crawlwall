@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -46,6 +47,8 @@ type CacheStatus struct {
 type Service struct {
 	logger    *zap.Logger
 	verifiers map[string]Verifier
+	wg        sync.WaitGroup
+	cancel    context.CancelFunc
 }
 
 func NewService(bots []config.BotConfig, logger *zap.Logger) *Service {
@@ -68,6 +71,64 @@ func NewService(bots []config.BotConfig, logger *zap.Logger) *Service {
 	return &Service{
 		logger:    logger,
 		verifiers: verifiers,
+	}
+}
+
+// Start launches one background refresher per ip_ranges verifier. Each warms
+// its cache once up front and then refreshes on a ticker. Warming runs in the
+// background so startup and caddy reload are never blocked by slow or
+// unreachable sources. Stop must be called to release the refreshers.
+func (s *Service) Start() {
+	refreshCtx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+
+	for id, verifier := range s.verifiers {
+		ranges, ok := verifier.(*ipRangesVerifier)
+		if !ok {
+			continue
+		}
+
+		s.wg.Add(1)
+		go func(id string, v *ipRangesVerifier) {
+			defer s.wg.Done()
+			s.runRefresher(refreshCtx, id, v)
+		}(id, ranges)
+	}
+}
+
+// Stop cancels the background refreshers and waits for them to exit.
+func (s *Service) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.wg.Wait()
+}
+
+func (s *Service) runRefresher(ctx context.Context, id string, v *ipRangesVerifier) {
+	// Warm the cache once before ticking. Until this completes, the request path
+	// falls back to a single-flighted inline fetch.
+	if err := v.forceRefresh(ctx); err != nil {
+		s.logger.Warn("crawlwall ip range warm-up failed",
+			zap.String("bot_id", id),
+			zap.Error(err),
+		)
+	}
+
+	ticker := time.NewTicker(v.refreshInterval())
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := v.forceRefresh(ctx); err != nil {
+				s.logger.Warn("crawlwall ip range refresh failed",
+					zap.String("bot_id", id),
+					zap.Error(err),
+				)
+			}
+		}
 	}
 }
 

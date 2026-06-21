@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
@@ -279,6 +280,136 @@ rules:
 	}
 }
 
+func verifierErrorPolicy(mode string) func(keyPath, rangesURL string) string {
+	return func(keyPath, rangesURL string) string {
+		return strings.TrimSpace(`
+version: crawlwall.io/v1
+
+site:
+  id: test-site
+  host: localhost
+  mode: ` + mode + `
+
+runtime:
+  fail_mode: block
+  default_action:
+    type: allow
+
+ledger:
+  enabled: true
+
+receipts:
+  enabled: false
+
+bots:
+  - id: gptbot
+    name: GPTBot
+    class: ai_training
+    match:
+      user_agents:
+        - "GPTBot"
+    verify:
+      type: ip_ranges
+      sources:
+        - "` + rangesURL + `"
+      refresh: 1h
+      stale_action: fail_closed
+      max_stale: 0s
+
+  - id: unknown
+    name: Unknown
+    class: unknown
+    match:
+      default: true
+    verify:
+      type: none
+
+rules:
+  - id: block_spoofed_known_bots
+    priority: 10
+    when: >
+      bot.claimed && !bot.verified
+    action:
+      type: block
+      status: 403
+      reason: spoofed_bot
+`) + "\n"
+	}
+}
+
+func TestServeHTTPShadowModeDoesNotBlockOnVerifierError(t *testing.T) {
+	// The ranges source returns a document with no CIDRs, so the ip_ranges
+	// verifier fails closed and Verify returns an error.
+	mod, _ := newTestModuleWithPolicy(t, `{}`, verifierErrorPolicy("shadow"))
+	defer closeLedger(t, mod)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://localhost/archive/a", nil)
+	request.Header.Set("User-Agent", "GPTBot/1.1")
+	request.RemoteAddr = "198.51.100.10:1234"
+
+	calledNext := false
+	err := mod.ServeHTTP(recorder, request, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
+		calledNext = true
+		w.WriteHeader(http.StatusOK)
+		return nil
+	}))
+	if err != nil {
+		t.Fatalf("ServeHTTP() error = %v", err)
+	}
+	if !calledNext {
+		t.Fatalf("next handler should be called: shadow mode must not block on verifier errors")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("recorder.Code = %d, want 200", recorder.Code)
+	}
+
+	records := exportedRecords(t, mod)
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d", len(records))
+	}
+	if records[0].Event.Action != "block" || records[0].Event.RuleID != "block_spoofed_known_bots" {
+		t.Fatalf("logged decision = %q via %q, want would-be block from policy", records[0].Event.Action, records[0].Event.RuleID)
+	}
+	if records[0].Event.Status != http.StatusOK {
+		t.Fatalf("logged status = %d, want upstream 200", records[0].Event.Status)
+	}
+}
+
+func TestServeHTTPEnforceModeBlocksOnVerifierError(t *testing.T) {
+	mod, _ := newTestModuleWithPolicy(t, `{}`, verifierErrorPolicy("enforce"))
+	defer closeLedger(t, mod)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://localhost/archive/a", nil)
+	request.Header.Set("User-Agent", "GPTBot/1.1")
+	request.RemoteAddr = "198.51.100.10:1234"
+
+	calledNext := false
+	err := mod.ServeHTTP(recorder, request, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
+		calledNext = true
+		w.WriteHeader(http.StatusOK)
+		return nil
+	}))
+	if err != nil {
+		t.Fatalf("ServeHTTP() error = %v", err)
+	}
+	if calledNext {
+		t.Fatalf("next handler should not be called when enforcing fail_mode block")
+	}
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("recorder.Code = %d, want 503", recorder.Code)
+	}
+
+	records := exportedRecords(t, mod)
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d", len(records))
+	}
+	if records[0].Event.RuleID != "runtime.verifier_error" || records[0].Event.ActionReason != "verification_failed" {
+		t.Fatalf("logged decision = %q/%q, want runtime.verifier_error/verification_failed", records[0].Event.RuleID, records[0].Event.ActionReason)
+	}
+}
+
 func TestServeHTTPUsesTrustedClientIPVariableForVerification(t *testing.T) {
 	mod, _ := newTestModule(t, `{"prefixes":[{"ipv4Prefix":"20.125.66.80/28"}]}`)
 	defer closeLedger(t, mod)
@@ -349,7 +480,14 @@ func TestServeHTTPRateLimitsVerifiedTrainingBot(t *testing.T) {
 	mod, _ := newTestModule(t, `{"prefixes":[{"ipv4Prefix":"20.125.66.80/28"}]}`)
 	defer closeLedger(t, mod)
 
-	for i := 0; i < 120; i++ {
+	// Send well over the configured rpm (120) so token refill timing cannot
+	// mask the limit. Asserting "some allowed and some limited" is insensitive
+	// to how long the loop takes (it would only fail if the loop ran for tens
+	// of seconds, which it never does).
+	const requests = 240
+	allowed := 0
+	limited := 0
+	for i := 0; i < requests; i++ {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, "http://localhost/public/a", nil)
 		request.Header.Set("User-Agent", "GPTBot/1.1")
@@ -362,34 +500,108 @@ func TestServeHTTPRateLimitsVerifiedTrainingBot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ServeHTTP() iteration %d error = %v", i, err)
 		}
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("recorder.Code iteration %d = %d", i, recorder.Code)
+		switch recorder.Code {
+		case http.StatusOK:
+			allowed++
+		case http.StatusTooManyRequests:
+			limited++
+		default:
+			t.Fatalf("iteration %d unexpected status %d", i, recorder.Code)
 		}
 	}
 
-	lastRecorder := httptest.NewRecorder()
-	lastRequest := httptest.NewRequest(http.MethodGet, "http://localhost/public/a", nil)
-	lastRequest.Header.Set("User-Agent", "GPTBot/1.1")
-	lastRequest.RemoteAddr = "20.125.66.81:1234"
-
-	err := mod.ServeHTTP(lastRecorder, lastRequest, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
-		w.WriteHeader(http.StatusOK)
-		return nil
-	}))
-	if err != nil {
-		t.Fatalf("ServeHTTP() last error = %v", err)
+	if allowed == 0 {
+		t.Fatalf("expected some requests to be allowed within the burst")
 	}
-	if lastRecorder.Code != http.StatusTooManyRequests {
-		t.Fatalf("lastRecorder.Code = %d", lastRecorder.Code)
+	if limited == 0 {
+		t.Fatalf("expected some of %d requests to be rate limited against rpm 120", requests)
 	}
 
 	records := exportedRecords(t, mod)
-	if len(records) != 121 {
-		t.Fatalf("len(records) = %d", len(records))
+	if len(records) != requests {
+		t.Fatalf("len(records) = %d, want %d", len(records), requests)
 	}
-	if records[len(records)-1].Event.Action != "rate_limit_exceeded" {
-		t.Fatalf("last action = %q", records[len(records)-1].Event.Action)
+	exceeded := 0
+	for _, record := range records {
+		if record.Event.Action == "rate_limit_exceeded" {
+			exceeded++
+		}
 	}
+	if exceeded != limited {
+		t.Fatalf("rate_limit_exceeded records = %d, want %d", exceeded, limited)
+	}
+}
+
+func TestServeHTTPConcurrentRateLimitNoSharedState(t *testing.T) {
+	// A per-request limit key (request.ip) makes the shared *config.Limit
+	// pointer race observable: each request resolves its own key. Run under
+	// -race. rpm is set high so nothing is actually limited.
+	mod, _ := newTestModuleWithPolicy(t, `{"prefixes":[{"ipv4Prefix":"20.125.66.80/28"}]}`, func(keyPath, rangesURL string) string {
+		return strings.TrimSpace(`
+version: crawlwall.io/v1
+site:
+  id: test-site
+  host: localhost
+  mode: enforce
+runtime:
+  fail_mode: allow
+  default_action:
+    type: allow
+ledger:
+  enabled: true
+receipts:
+  enabled: false
+bots:
+  - id: gptbot
+    name: GPTBot
+    class: ai_training
+    match:
+      user_agents:
+        - "GPTBot"
+    verify:
+      type: ip_ranges
+      sources:
+        - "` + rangesURL + `"
+      refresh: 1h
+  - id: unknown
+    name: Unknown
+    class: unknown
+    match:
+      default: true
+    verify:
+      type: none
+rules:
+  - id: rate_limit_ai_training
+    priority: 300
+    when: >
+      bot.verified && bot.class == "ai_training"
+    action:
+      type: rate_limit
+      limit:
+        key: "request.ip"
+        rpm: 1000000
+`) + "\n"
+	})
+	defer closeLedger(t, mod)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "http://localhost/public/a", nil)
+			request.Header.Set("User-Agent", "GPTBot/1.1")
+			request.RemoteAddr = "20.125.66.81:1234"
+			if err := mod.ServeHTTP(recorder, request, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
+				w.WriteHeader(http.StatusOK)
+				return nil
+			})); err != nil {
+				t.Errorf("ServeHTTP() error = %v", err)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func newTestModule(t *testing.T, ipRangesResponse string) (*Crawlwall, ed25519.PublicKey) {

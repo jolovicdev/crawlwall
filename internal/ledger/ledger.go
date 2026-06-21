@@ -72,17 +72,19 @@ type Event struct {
 	ReceiptID        string
 	ReceiptSignature string
 	ReceiptRequested bool
+	Enforced         bool
 }
 
 type ReportRow struct {
-	BotID    string
-	BotName  string
-	Class    string
-	Verified bool
-	Requests int64
-	Allowed  int64
-	Blocked  int64
-	Metered  int64
+	BotID      string
+	BotName    string
+	Class      string
+	Verified   bool
+	Requests   int64
+	Allowed    int64
+	Blocked    int64
+	WouldBlock int64
+	Metered    int64
 }
 
 type ExportRecord struct {

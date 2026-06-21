@@ -1,5 +1,9 @@
 # CrawlWall: Caddy AI Crawler Access Control
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/jolovicdev/crawlwall.svg)](https://pkg.go.dev/github.com/jolovicdev/crawlwall)
+[![Go version](https://img.shields.io/github/go-mod/go-version/jolovicdev/crawlwall)](go.mod)
+[![License: MIT](https://img.shields.io/github/license/jolovicdev/crawlwall)](LICENSE)
+
 > [!IMPORTANT]
 > CrawlWall is alpha and experimental. It is useful for local testing, demos,
 > and careful shadow-mode trials, but it is not yet a battle-tested production
@@ -7,12 +11,16 @@
 > enforcing blocks on real traffic.
 
 A self-hosted Caddy module for AI crawler blocking, bot verification, rate
-limiting, metered access, and signed crawl receipts.
+limiting, metered access, and signed crawl receipts. Block or rate-limit AI
+crawlers such as GPTBot and ClaudeBot while still allowing verified search
+engines such as Googlebot.
 
 CrawlWall sits in front of your application and turns robots.txt-style crawler
 policy into enforceable HTTP-edge rules using YAML and CEL. It identifies
-crawlers, verifies their identity, evaluates policy, records what happened, and
-can sign receipts for metered access.
+crawlers, verifies their identity with forward-confirmed reverse DNS (FCrDNS) or
+published IP ranges,
+evaluates policy, records what happened, and can sign receipts for metered
+access.
 
 The short version is:
 
@@ -25,6 +33,7 @@ The short version is:
 ## Contents
 
 - [Why this exists](#why-this-exists)
+- [Supported crawlers](#supported-crawlers)
 - [Mental model](#mental-model)
 - [Architecture](#architecture)
 - [How a request is handled](#how-a-request-is-handled)
@@ -66,6 +75,32 @@ CrawlWall moves that logic into the HTTP edge and gives it a stable shape:
 
 The point is not to be clever. The point is to be explicit, inspectable, and
 replaceable.
+
+## Supported crawlers
+
+CrawlWall ships no fixed blocklist. You declare the crawlers you care about in
+policy and pick how each is verified. The ones people usually configure:
+
+| Crawler | User-Agent contains | Verify by |
+| --- | --- | --- |
+| Googlebot | `Googlebot` | reverse DNS (`.googlebot.com`) |
+| Bingbot | `bingbot` | reverse DNS (`.search.msn.com`) |
+| GPTBot | `GPTBot` | published IP ranges |
+| ChatGPT-User | `ChatGPT-User` | published IP ranges |
+| OAI-SearchBot | `OAI-SearchBot` | published IP ranges |
+| ClaudeBot | `ClaudeBot` | published IP ranges |
+| PerplexityBot | `PerplexityBot` | published IP ranges |
+| CCBot | `CCBot` | user agent only |
+| Bytespider | `Bytespider` | user agent only |
+
+Matching is a case-insensitive substring of the `User-Agent`. Verification is
+what separates a real crawler from anything copying its user agent, so prefer
+reverse DNS or IP ranges over user-agent-only matching where the operator
+publishes them.
+
+robots.txt-only tokens such as `Google-Extended` are advisory and never arrive
+as a distinct fetcher, so they cannot be enforced at the edge. Configure the
+actual fetch user agents instead.
 
 ## Mental model
 
@@ -458,7 +493,8 @@ V1 ships with three verifier types:
 
 ### `reverse_dns`
 
-This is the standard pattern used for bots like Googlebot:
+This is the standard forward-confirmed reverse DNS (FCrDNS) pattern used for bots
+like Googlebot:
 
 1. resolve remote IP to PTR names
 2. require a configured suffix match

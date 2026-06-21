@@ -21,6 +21,7 @@ import (
 	"github.com/jolovicdev/crawlwall/internal/ratelimit"
 	"github.com/jolovicdev/crawlwall/internal/receipt"
 	"github.com/jolovicdev/crawlwall/internal/verify"
+	"github.com/jolovicdev/crawlwall/internal/version"
 )
 
 func init() {
@@ -94,7 +95,12 @@ func (m *Crawlwall) Provision(ctx caddy.Context) error {
 	m.limiter = ratelimit.New()
 	m.signer = signer
 
+	// Start background ip_ranges refreshers. They warm the caches without
+	// blocking startup; until warm, the request path uses an inline fetch.
+	m.verifier.Start()
+
 	m.logger.Info("crawlwall provisioned",
+		zap.String("version", version.Version),
 		zap.String("policy_file", m.PolicyFile),
 		zap.String("ledger_dsn", m.LedgerDSN),
 		zap.String("site_id", cfg.Site.ID),
@@ -116,6 +122,10 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		Headers:  r.Header,
 	})
 
+	// observe and shadow are non-enforcing modes; only enforce may affect
+	// real traffic, including the verifier fail-closed path below.
+	enforce := m.config.Site.Mode == config.SiteModeEnforce
+
 	if verifyErr != nil {
 		m.logger.Warn("crawlwall verifier error",
 			zap.String("bot_id", identifiedBot.ID),
@@ -123,12 +133,13 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			zap.Error(verifyErr),
 		)
 
-		if m.config.Runtime.FailMode == config.FailModeBlock {
+		if enforce && m.config.Runtime.FailMode == config.FailModeBlock {
 			event := ledger.EventFromRequest(start, r, remoteIP, identifiedBot, verification, m.policy.DefaultDecision(), m.config.Site.ID)
 			event.Action = string(config.ActionBlock)
 			event.ActionReason = "verification_failed"
 			event.RuleID = "runtime.verifier_error"
 			event.Status = http.StatusServiceUnavailable
+			event.Enforced = true
 			event.DurationMS = time.Since(start).Milliseconds()
 			m.writeLedgerAndReceipt(r.Context(), &event)
 			http.Error(w, "crawlwall verifier unavailable", http.StatusServiceUnavailable)
@@ -143,7 +154,6 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			Class:    identifiedBot.Class,
 			Claimed:  identifiedBot.Claimed,
 			Verified: verification.Verified,
-			Signed:   false,
 			Operator: identifiedBot.Operator,
 		},
 		Request: policy.RequestInput{
@@ -176,8 +186,6 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 	event := ledger.EventFromRequest(start, r, remoteIP, identifiedBot, verification, decision, m.config.Site.ID)
 	event.DurationMS = time.Since(start).Milliseconds()
 
-	enforce := m.config.Site.Mode == config.SiteModeEnforce
-
 	switch decision.Action.Type {
 	case config.ActionBlock:
 		if enforce {
@@ -186,6 +194,7 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 				status = http.StatusForbidden
 			}
 			event.Status = status
+			event.Enforced = true
 			event.DurationMS = time.Since(start).Milliseconds()
 			m.writeLedgerAndReceipt(r.Context(), &event)
 			http.Error(w, decision.Action.Reason, status)
@@ -196,6 +205,7 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			event.Status = http.StatusTooManyRequests
 			event.Action = "rate_limit_exceeded"
 			event.ActionReason = "rate_limit_exceeded"
+			event.Enforced = true
 			event.DurationMS = time.Since(start).Milliseconds()
 			m.writeLedgerAndReceipt(r.Context(), &event)
 			http.Error(w, "rate limited by crawlwall", http.StatusTooManyRequests)
@@ -217,6 +227,16 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 	m.writeLedgerAndReceipt(r.Context(), &event)
 
 	return err
+}
+
+func (m *Crawlwall) Cleanup() error {
+	if m.verifier != nil {
+		m.verifier.Stop()
+	}
+	if m.ledger != nil {
+		return m.ledger.Close()
+	}
+	return nil
 }
 
 func (m *Crawlwall) writeLedgerAndReceipt(ctx context.Context, event *ledger.Event) {
@@ -281,5 +301,6 @@ func headersToMap(headers http.Header) map[string]string {
 
 var (
 	_ caddy.Provisioner           = (*Crawlwall)(nil)
+	_ caddy.CleanerUpper          = (*Crawlwall)(nil)
 	_ caddyhttp.MiddlewareHandler = (*Crawlwall)(nil)
 )

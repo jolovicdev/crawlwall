@@ -26,6 +26,7 @@ import (
 	"github.com/jolovicdev/crawlwall/internal/receipt"
 	"github.com/jolovicdev/crawlwall/internal/scaffold"
 	"github.com/jolovicdev/crawlwall/internal/verify"
+	"github.com/jolovicdev/crawlwall/internal/version"
 )
 
 func main() {
@@ -53,6 +54,9 @@ func run(ctx context.Context, args []string) error {
 		return runReceipts(ctx, args[1:])
 	case "verifiers":
 		return runVerifiers(ctx, args[1:])
+	case "version":
+		fmt.Println(version.Version)
+		return nil
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
@@ -645,13 +649,13 @@ func verifyReceipts(_ context.Context, r io.Reader, publicKey ed25519.PublicKey)
 
 func printReport(w io.Writer, report []ledger.ReportRow) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "Bot\tClass\tVerified\tRequests\tAllowed\tBlocked\tMetered")
+	fmt.Fprintln(tw, "Bot\tClass\tVerified\tRequests\tAllowed\tBlocked\tWould block\tMetered")
 	for _, row := range report {
 		verified := "no"
 		if row.Verified {
 			verified = "yes"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\n", row.BotName, row.Class, verified, row.Requests, row.Allowed, row.Blocked, row.Metered)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\n", row.BotName, row.Class, verified, row.Requests, row.Allowed, row.Blocked, row.WouldBlock, row.Metered)
 	}
 	_ = tw.Flush()
 }
@@ -705,7 +709,8 @@ func usage() {
   crawlwall ledger report --db ./crawlwall.db --since 24h
   crawlwall ledger export --db ./crawlwall.db --format jsonl
   crawlwall ledger vacuum --db ./crawlwall.db --older-than 30d
-  crawlwall receipts verify --file receipts.jsonl --public-key crawlwall.pub`)
+  crawlwall receipts verify --file receipts.jsonl --public-key crawlwall.pub
+  crawlwall version`)
 }
 
 func writeScaffoldFile(path, contents string, force bool, perm os.FileMode) error {

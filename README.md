@@ -17,7 +17,8 @@ engines such as Googlebot.
 
 CrawlWall sits in front of your application and turns robots.txt-style crawler
 policy into enforceable HTTP-edge rules using YAML and CEL. It identifies
-crawlers, verifies their identity with reverse DNS or published IP ranges,
+crawlers, verifies their identity with forward-confirmed reverse DNS (FCrDNS) or
+published IP ranges,
 evaluates policy, records what happened, and can sign receipts for metered
 access.
 
@@ -492,7 +493,8 @@ V1 ships with three verifier types:
 
 ### `reverse_dns`
 
-This is the standard pattern used for bots like Googlebot:
+This is the standard forward-confirmed reverse DNS (FCrDNS) pattern used for bots
+like Googlebot:
 
 1. resolve remote IP to PTR names
 2. require a configured suffix match

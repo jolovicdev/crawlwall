@@ -2,6 +2,7 @@ package verify
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"sync"
@@ -49,6 +50,12 @@ func (v *reverseDNSVerifier) Verify(ctx context.Context, ip net.IP) (Result, err
 func (v *reverseDNSVerifier) lookup(ctx context.Context, ip net.IP) (Result, error) {
 	names, err := v.resolver.LookupAddr(ctx, ip.String())
 	if err != nil {
+		// An IP with no PTR record is the common case (most spoofers, many
+		// clients). That is "not verified", not a verifier outage, so callers
+		// can let policy decide instead of failing the verifier.
+		if isNotFoundDNSError(err) {
+			return Result{Type: "reverse_dns", Reason: "reverse_dns_no_ptr"}, nil
+		}
 		return Result{Type: "reverse_dns", Reason: "ptr_lookup_failed"}, err
 	}
 
@@ -60,6 +67,9 @@ func (v *reverseDNSVerifier) lookup(ctx context.Context, ip net.IP) (Result, err
 
 		addrs, err := v.resolver.LookupIPAddr(ctx, host)
 		if err != nil {
+			if isNotFoundDNSError(err) {
+				continue
+			}
 			return Result{Type: "reverse_dns", Reason: "forward_lookup_failed"}, err
 		}
 		for _, addr := range addrs {
@@ -78,6 +88,14 @@ func (v *reverseDNSVerifier) lookup(ctx context.Context, ip net.IP) (Result, err
 		Type:     "reverse_dns",
 		Reason:   "reverse_dns_no_roundtrip_match",
 	}, nil
+}
+
+func isNotFoundDNSError(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return dnsErr.IsNotFound
+	}
+	return false
 }
 
 func (v *reverseDNSVerifier) allowed(host string) bool {

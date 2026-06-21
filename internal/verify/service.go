@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -46,6 +47,8 @@ type CacheStatus struct {
 type Service struct {
 	logger    *zap.Logger
 	verifiers map[string]Verifier
+	wg        sync.WaitGroup
+	cancel    context.CancelFunc
 }
 
 func NewService(bots []config.BotConfig, logger *zap.Logger) *Service {
@@ -68,6 +71,62 @@ func NewService(bots []config.BotConfig, logger *zap.Logger) *Service {
 	return &Service{
 		logger:    logger,
 		verifiers: verifiers,
+	}
+}
+
+// Start warms the ip_ranges caches with an initial fetch and launches one
+// background refresher per ip_ranges verifier. Warm-up failures are logged and
+// do not block startup; the per-request fail_closed or use_stale behavior still
+// applies. Stop must be called to release the refreshers.
+func (s *Service) Start(ctx context.Context) {
+	refreshCtx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+
+	for id, verifier := range s.verifiers {
+		ranges, ok := verifier.(*ipRangesVerifier)
+		if !ok {
+			continue
+		}
+
+		if err := ranges.forceRefresh(ctx); err != nil {
+			s.logger.Warn("crawlwall ip range warm-up failed",
+				zap.String("bot_id", id),
+				zap.Error(err),
+			)
+		}
+
+		s.wg.Add(1)
+		go func(id string, v *ipRangesVerifier) {
+			defer s.wg.Done()
+			s.runRefresher(refreshCtx, id, v)
+		}(id, ranges)
+	}
+}
+
+// Stop cancels the background refreshers and waits for them to exit.
+func (s *Service) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.wg.Wait()
+}
+
+func (s *Service) runRefresher(ctx context.Context, id string, v *ipRangesVerifier) {
+	ticker := time.NewTicker(v.refreshInterval())
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := v.forceRefresh(ctx); err != nil {
+				s.logger.Warn("crawlwall ip range refresh failed",
+					zap.String("bot_id", id),
+					zap.Error(err),
+				)
+			}
+		}
 	}
 }
 

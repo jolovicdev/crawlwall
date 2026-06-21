@@ -94,6 +94,10 @@ func (m *Crawlwall) Provision(ctx caddy.Context) error {
 	m.limiter = ratelimit.New()
 	m.signer = signer
 
+	// Warm the ip_ranges caches and start background refreshers so the request
+	// path serves from a warm cache instead of fetching sources inline.
+	m.verifier.Start(ctx)
+
 	m.logger.Info("crawlwall provisioned",
 		zap.String("policy_file", m.PolicyFile),
 		zap.String("ledger_dsn", m.LedgerDSN),
@@ -221,6 +225,16 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 	return err
 }
 
+func (m *Crawlwall) Cleanup() error {
+	if m.verifier != nil {
+		m.verifier.Stop()
+	}
+	if m.ledger != nil {
+		return m.ledger.Close()
+	}
+	return nil
+}
+
 func (m *Crawlwall) writeLedgerAndReceipt(ctx context.Context, event *ledger.Event) {
 	if m.ledger == nil {
 		return
@@ -283,5 +297,6 @@ func headersToMap(headers http.Header) map[string]string {
 
 var (
 	_ caddy.Provisioner           = (*Crawlwall)(nil)
+	_ caddy.CleanerUpper          = (*Crawlwall)(nil)
 	_ caddyhttp.MiddlewareHandler = (*Crawlwall)(nil)
 )

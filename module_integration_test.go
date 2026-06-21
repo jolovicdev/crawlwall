@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
@@ -520,6 +521,78 @@ func TestServeHTTPRateLimitsVerifiedTrainingBot(t *testing.T) {
 	if records[len(records)-1].Event.Action != "rate_limit_exceeded" {
 		t.Fatalf("last action = %q", records[len(records)-1].Event.Action)
 	}
+}
+
+func TestServeHTTPConcurrentRateLimitNoSharedState(t *testing.T) {
+	// A per-request limit key (request.ip) makes the shared *config.Limit
+	// pointer race observable: each request resolves its own key. Run under
+	// -race. rpm is set high so nothing is actually limited.
+	mod, _ := newTestModuleWithPolicy(t, `{"prefixes":[{"ipv4Prefix":"20.125.66.80/28"}]}`, func(keyPath, rangesURL string) string {
+		return strings.TrimSpace(`
+version: crawlwall.io/v1
+site:
+  id: test-site
+  host: localhost
+  mode: enforce
+runtime:
+  fail_mode: allow
+  default_action:
+    type: allow
+ledger:
+  enabled: true
+receipts:
+  enabled: false
+bots:
+  - id: gptbot
+    name: GPTBot
+    class: ai_training
+    match:
+      user_agents:
+        - "GPTBot"
+    verify:
+      type: ip_ranges
+      sources:
+        - "` + rangesURL + `"
+      refresh: 1h
+  - id: unknown
+    name: Unknown
+    class: unknown
+    match:
+      default: true
+    verify:
+      type: none
+rules:
+  - id: rate_limit_ai_training
+    priority: 300
+    when: >
+      bot.verified && bot.class == "ai_training"
+    action:
+      type: rate_limit
+      limit:
+        key: "request.ip"
+        rpm: 1000000
+`) + "\n"
+	})
+	defer closeLedger(t, mod)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "http://localhost/public/a", nil)
+			request.Header.Set("User-Agent", "GPTBot/1.1")
+			request.RemoteAddr = "20.125.66.81:1234"
+			if err := mod.ServeHTTP(recorder, request, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
+				w.WriteHeader(http.StatusOK)
+				return nil
+			})); err != nil {
+				t.Errorf("ServeHTTP() error = %v", err)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func newTestModule(t *testing.T, ipRangesResponse string) (*Crawlwall, ed25519.PublicKey) {

@@ -52,7 +52,24 @@ site:
 | `enforce` | Apply block and rate-limit decisions |
 
 Start production policy changes in `shadow`, inspect the ledger, then switch to
-`enforce` after the results look sane.
+`enforce` after the results look sane. In `shadow` and `observe`, a decision
+that would have blocked is recorded but the request is served; those show up as
+`Would block` in `ledger report`, separate from real `Blocked` counts.
+
+### Verifier failures
+
+When a verifier cannot complete, for example a reverse DNS timeout or an
+unreachable IP range source, `runtime.fail_mode` decides the outcome, but it
+only affects traffic in `enforce`:
+
+| `fail_mode` | `enforce` | `shadow` and `observe` |
+| --- | --- | --- |
+| `block` | Return `503` and stop | Log the would-be decision, serve the request |
+| `allow` | Fall through to policy | Fall through to policy |
+
+A missing PTR record is not a verifier failure. It is treated as
+`bot.verified == false`, so a rule such as `bot.claimed && !bot.verified`
+decides the outcome instead.
 
 ## Available Inputs
 
@@ -180,6 +197,11 @@ better than a clever rule that blocks the wrong crawler at 2 AM.
       key: "bot.id"
       rpm: 120
 ```
+
+`limit.key` selects the counter bucket. It must reference a known input path
+such as `bot.id`, `request.ip`, `request.path`, or `request.headers.<name>`. An
+unknown key is rejected when the policy loads, so a typo cannot silently send
+every request into one shared bucket.
 
 ### Block Unknown Crawlers on Protected Paths
 

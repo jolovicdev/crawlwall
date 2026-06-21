@@ -20,6 +20,12 @@ func New() *Limiter {
 }
 
 func (l *Limiter) Allow(key string, rpm int) bool {
+	return l.allowAt(key, rpm, time.Now())
+}
+
+// allowAt is Allow with an explicit clock so the limit boundary can be tested
+// without depending on wall-clock timing.
+func (l *Limiter) allowAt(key string, rpm int, now time.Time) bool {
 	if rpm <= 0 {
 		return true
 	}
@@ -40,5 +46,5 @@ func (l *Limiter) Allow(key string, rpm int) bool {
 	}
 	l.mu.Unlock()
 
-	return limiter.Allow()
+	return limiter.AllowN(now, 1)
 }

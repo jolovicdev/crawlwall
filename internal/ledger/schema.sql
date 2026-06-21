@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS crawl_events (
     price_unit TEXT,
 
     receipt_id TEXT,
-    receipt_signature TEXT
+    receipt_signature TEXT,
+
+    enforced BOOLEAN NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_crawl_events_ts ON crawl_events(ts);

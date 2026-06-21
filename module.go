@@ -137,6 +137,7 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			event.ActionReason = "verification_failed"
 			event.RuleID = "runtime.verifier_error"
 			event.Status = http.StatusServiceUnavailable
+			event.Enforced = true
 			event.DurationMS = time.Since(start).Milliseconds()
 			m.writeLedgerAndReceipt(r.Context(), &event)
 			http.Error(w, "crawlwall verifier unavailable", http.StatusServiceUnavailable)
@@ -191,6 +192,7 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 				status = http.StatusForbidden
 			}
 			event.Status = status
+			event.Enforced = true
 			event.DurationMS = time.Since(start).Milliseconds()
 			m.writeLedgerAndReceipt(r.Context(), &event)
 			http.Error(w, decision.Action.Reason, status)
@@ -201,6 +203,7 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			event.Status = http.StatusTooManyRequests
 			event.Action = "rate_limit_exceeded"
 			event.ActionReason = "rate_limit_exceeded"
+			event.Enforced = true
 			event.DurationMS = time.Since(start).Milliseconds()
 			m.writeLedgerAndReceipt(r.Context(), &event)
 			http.Error(w, "rate limited by crawlwall", http.StatusTooManyRequests)

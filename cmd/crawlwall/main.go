@@ -645,13 +645,13 @@ func verifyReceipts(_ context.Context, r io.Reader, publicKey ed25519.PublicKey)
 
 func printReport(w io.Writer, report []ledger.ReportRow) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "Bot\tClass\tVerified\tRequests\tAllowed\tBlocked\tMetered")
+	fmt.Fprintln(tw, "Bot\tClass\tVerified\tRequests\tAllowed\tBlocked\tWould block\tMetered")
 	for _, row := range report {
 		verified := "no"
 		if row.Verified {
 			verified = "yes"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\n", row.BotName, row.Class, verified, row.Requests, row.Allowed, row.Blocked, row.Metered)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\n", row.BotName, row.Class, verified, row.Requests, row.Allowed, row.Blocked, row.WouldBlock, row.Metered)
 	}
 	_ = tw.Flush()
 }

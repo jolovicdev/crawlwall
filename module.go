@@ -21,6 +21,7 @@ import (
 	"github.com/jolovicdev/crawlwall/internal/ratelimit"
 	"github.com/jolovicdev/crawlwall/internal/receipt"
 	"github.com/jolovicdev/crawlwall/internal/verify"
+	"github.com/jolovicdev/crawlwall/internal/version"
 )
 
 func init() {
@@ -99,6 +100,7 @@ func (m *Crawlwall) Provision(ctx caddy.Context) error {
 	m.verifier.Start(ctx)
 
 	m.logger.Info("crawlwall provisioned",
+		zap.String("version", version.Version),
 		zap.String("policy_file", m.PolicyFile),
 		zap.String("ledger_dsn", m.LedgerDSN),
 		zap.String("site_id", cfg.Site.ID),

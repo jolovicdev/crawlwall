@@ -26,6 +26,7 @@ import (
 	"github.com/jolovicdev/crawlwall/internal/receipt"
 	"github.com/jolovicdev/crawlwall/internal/scaffold"
 	"github.com/jolovicdev/crawlwall/internal/verify"
+	"github.com/jolovicdev/crawlwall/internal/version"
 )
 
 func main() {
@@ -53,6 +54,9 @@ func run(ctx context.Context, args []string) error {
 		return runReceipts(ctx, args[1:])
 	case "verifiers":
 		return runVerifiers(ctx, args[1:])
+	case "version":
+		fmt.Println(version.Version)
+		return nil
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
@@ -705,7 +709,8 @@ func usage() {
   crawlwall ledger report --db ./crawlwall.db --since 24h
   crawlwall ledger export --db ./crawlwall.db --format jsonl
   crawlwall ledger vacuum --db ./crawlwall.db --older-than 30d
-  crawlwall receipts verify --file receipts.jsonl --public-key crawlwall.pub`)
+  crawlwall receipts verify --file receipts.jsonl --public-key crawlwall.pub
+  crawlwall version`)
 }
 
 func writeScaffoldFile(path, contents string, force bool, perm os.FileMode) error {

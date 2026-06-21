@@ -116,6 +116,10 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		Headers:  r.Header,
 	})
 
+	// observe and shadow are non-enforcing modes; only enforce may affect
+	// real traffic, including the verifier fail-closed path below.
+	enforce := m.config.Site.Mode == config.SiteModeEnforce
+
 	if verifyErr != nil {
 		m.logger.Warn("crawlwall verifier error",
 			zap.String("bot_id", identifiedBot.ID),
@@ -123,7 +127,7 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			zap.Error(verifyErr),
 		)
 
-		if m.config.Runtime.FailMode == config.FailModeBlock {
+		if enforce && m.config.Runtime.FailMode == config.FailModeBlock {
 			event := ledger.EventFromRequest(start, r, remoteIP, identifiedBot, verification, m.policy.DefaultDecision(), m.config.Site.ID)
 			event.Action = string(config.ActionBlock)
 			event.ActionReason = "verification_failed"
@@ -175,8 +179,6 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 
 	event := ledger.EventFromRequest(start, r, remoteIP, identifiedBot, verification, decision, m.config.Site.ID)
 	event.DurationMS = time.Since(start).Milliseconds()
-
-	enforce := m.config.Site.Mode == config.SiteModeEnforce
 
 	switch decision.Action.Type {
 	case config.ActionBlock:

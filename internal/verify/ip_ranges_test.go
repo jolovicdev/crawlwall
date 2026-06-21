@@ -120,12 +120,14 @@ func TestServiceBackgroundRefreshUpdatesCache(t *testing.T) {
 			Refresh: "60ms",
 		},
 	}}, zap.NewNop())
-	svc.Start(context.Background())
+	svc.Start()
 	defer svc.Stop()
 
+	// Warm-up is asynchronous now; the first Verify falls back to an inline
+	// single-flighted fetch, so it still resolves the initial range.
 	result, err := svc.verifiers["gptbot"].Verify(context.Background(), net.ParseIP("20.0.0.5"))
 	if err != nil || !result.Verified {
-		t.Fatalf("warm start Verify() = %+v, err = %v", result, err)
+		t.Fatalf("first Verify() = %+v, err = %v", result, err)
 	}
 
 	payload.Store(`{"prefixes":[{"ipv4Prefix":"30.0.0.0/24"}]}`)

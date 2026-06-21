@@ -95,9 +95,9 @@ func (m *Crawlwall) Provision(ctx caddy.Context) error {
 	m.limiter = ratelimit.New()
 	m.signer = signer
 
-	// Warm the ip_ranges caches and start background refreshers so the request
-	// path serves from a warm cache instead of fetching sources inline.
-	m.verifier.Start(ctx)
+	// Start background ip_ranges refreshers. They warm the caches without
+	// blocking startup; until warm, the request path uses an inline fetch.
+	m.verifier.Start()
 
 	m.logger.Info("crawlwall provisioned",
 		zap.String("version", version.Version),

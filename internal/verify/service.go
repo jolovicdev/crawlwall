@@ -74,11 +74,11 @@ func NewService(bots []config.BotConfig, logger *zap.Logger) *Service {
 	}
 }
 
-// Start warms the ip_ranges caches with an initial fetch and launches one
-// background refresher per ip_ranges verifier. Warm-up failures are logged and
-// do not block startup; the per-request fail_closed or use_stale behavior still
-// applies. Stop must be called to release the refreshers.
-func (s *Service) Start(ctx context.Context) {
+// Start launches one background refresher per ip_ranges verifier. Each warms
+// its cache once up front and then refreshes on a ticker. Warming runs in the
+// background so startup and caddy reload are never blocked by slow or
+// unreachable sources. Stop must be called to release the refreshers.
+func (s *Service) Start() {
 	refreshCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 
@@ -86,13 +86,6 @@ func (s *Service) Start(ctx context.Context) {
 		ranges, ok := verifier.(*ipRangesVerifier)
 		if !ok {
 			continue
-		}
-
-		if err := ranges.forceRefresh(ctx); err != nil {
-			s.logger.Warn("crawlwall ip range warm-up failed",
-				zap.String("bot_id", id),
-				zap.Error(err),
-			)
 		}
 
 		s.wg.Add(1)
@@ -112,6 +105,15 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) runRefresher(ctx context.Context, id string, v *ipRangesVerifier) {
+	// Warm the cache once before ticking. Until this completes, the request path
+	// falls back to a single-flighted inline fetch.
+	if err := v.forceRefresh(ctx); err != nil {
+		s.logger.Warn("crawlwall ip range warm-up failed",
+			zap.String("bot_id", id),
+			zap.Error(err),
+		)
+	}
+
 	ticker := time.NewTicker(v.refreshInterval())
 	defer ticker.Stop()
 

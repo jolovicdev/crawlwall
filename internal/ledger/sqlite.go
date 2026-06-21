@@ -32,7 +32,7 @@ func openSQLite(dsn string) (Ledger, error) {
 		return nil, fmt.Errorf("sqlite ledger path is required")
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", sqliteConnString(path))
 	if err != nil {
 		return nil, err
 	}
@@ -47,6 +47,23 @@ func openSQLite(dsn string) (Ledger, error) {
 	}
 
 	return &sqliteLedger{db: db}, nil
+}
+
+// sqliteConnString adds per-connection pragmas. WAL plus a busy timeout lets
+// the request-path writers wait briefly for the lock instead of dropping events
+// with SQLITE_BUSY under concurrency.
+func sqliteConnString(path string) string {
+	pragmas := []string{
+		"_pragma=busy_timeout(5000)",
+		"_pragma=journal_mode(WAL)",
+		"_pragma=synchronous(NORMAL)",
+		"_pragma=foreign_keys(ON)",
+	}
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + strings.Join(pragmas, "&")
 }
 
 func (l *sqliteLedger) WriteEvent(ctx context.Context, event Event) error {

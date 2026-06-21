@@ -3,8 +3,10 @@ package ledger
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -44,6 +46,43 @@ func TestSQLiteLedgerPruneDeletesOldEvents(t *testing.T) {
 	}
 	if !strings.Contains(exported, `"EventID":"new"`) {
 		t.Fatalf("export does not contain new event: %s", exported)
+	}
+}
+
+func TestSQLiteLedgerConcurrentWritesAllPersist(t *testing.T) {
+	ctx := context.Background()
+	led, err := Open("sqlite://"+filepath.Join(t.TempDir(), "crawlwall.db"), true)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer led.Close()
+
+	const writers = 32
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			event := testEvent(fmt.Sprintf("evt-%d", n), time.Now())
+			if err := led.WriteEvent(ctx, event); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent WriteEvent error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := led.ExportJSONL(ctx, &out); err != nil {
+		t.Fatalf("ExportJSONL() error = %v", err)
+	}
+	lines := strings.Count(strings.TrimSpace(out.String()), "\n") + 1
+	if lines != writers {
+		t.Fatalf("persisted events = %d, want %d", lines, writers)
 	}
 }
 

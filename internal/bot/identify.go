@@ -2,6 +2,7 @@ package bot
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jolovicdev/crawlwall/internal/config"
 )
@@ -10,8 +11,16 @@ import (
 // Identify returns when any of them hits. Both are built once at provision time
 // so the request path only scans bytes.
 type matcher struct {
-	needles    []string
+	needles    []needle
 	identified Identified
+}
+
+type needle struct {
+	text string
+	// ascii marks a needle containsFold can match byte by byte. A needle with
+	// a non-ASCII letter needs real Unicode folding, so those fall back to
+	// matching against a lowercased copy of the user agent.
+	ascii bool
 }
 
 type Identifier struct {
@@ -46,10 +55,10 @@ func NewIdentifier(cfgs []config.BotConfig) *Identifier {
 			identifier.defaultBot = identified
 		}
 
-		needles := make([]string, 0, len(registered.Match.UserAgents))
-		for _, needle := range registered.Match.UserAgents {
-			if needle = strings.ToLower(strings.TrimSpace(needle)); needle != "" {
-				needles = append(needles, needle)
+		needles := make([]needle, 0, len(registered.Match.UserAgents))
+		for _, configured := range registered.Match.UserAgents {
+			if folded := strings.ToLower(strings.TrimSpace(configured)); folded != "" {
+				needles = append(needles, needle{text: folded, ascii: isASCII(folded)})
 			}
 		}
 		if len(needles) == 0 {
@@ -64,15 +73,39 @@ func NewIdentifier(cfgs []config.BotConfig) *Identifier {
 }
 
 func (i *Identifier) Identify(userAgent string) Identified {
+	// Lowercased lazily, and only when a non-ASCII needle is configured; the
+	// common all-ASCII configuration never allocates here.
+	lowered := ""
+	loweredReady := false
+
 	for _, m := range i.matchers {
-		for _, needle := range m.needles {
-			if containsFold(userAgent, needle) {
+		for _, n := range m.needles {
+			if n.ascii {
+				if containsFold(userAgent, n.text) {
+					return m.identified
+				}
+				continue
+			}
+			if !loweredReady {
+				lowered = strings.ToLower(userAgent)
+				loweredReady = true
+			}
+			if strings.Contains(lowered, n.text) {
 				return m.identified
 			}
 		}
 	}
 
 	return i.defaultBot
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // containsFold reports whether s contains lowerNeedle, folding ASCII case in s.

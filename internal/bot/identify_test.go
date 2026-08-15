@@ -88,3 +88,16 @@ func BenchmarkIdentify(b *testing.B) {
 		identifier.Identify(userAgent)
 	}
 }
+
+// A needle with a non-ASCII letter cannot be matched by ASCII folding alone;
+// it must keep the Unicode case-insensitivity the pre-matcher code had.
+func TestIdentifyNonASCIINeedleStaysCaseInsensitive(t *testing.T) {
+	identifier := NewIdentifier([]config.BotConfig{
+		{ID: "uni", Name: "Ünicorn", Class: "other", Match: config.MatchConfig{UserAgents: []string{"Ünicorn"}}},
+		{ID: "unknown", Name: "Unknown", Class: "unknown", Match: config.MatchConfig{Default: true}},
+	})
+
+	if got := identifier.Identify("Mozilla/5.0 ÜNICORN/2.0"); got.ID != "uni" {
+		t.Fatalf("Identify(upper-case UA) = %q, want uni", got.ID)
+	}
+}

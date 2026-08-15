@@ -199,10 +199,6 @@ func (noopLedger) Prune(context.Context, time.Time) (int64, error) {
 	return 0, nil
 }
 
-// newJSONEncoder centralizes the export encoding so the writer and the reader
-// (ParseExportLine) stay in step.
-func newJSONEncoder(w io.Writer) *json.Encoder { return json.NewEncoder(w) }
-
 func ParseExportLine(line []byte) (*ExportRecord, error) {
 	var exportRecord ExportRecord
 	if err := json.Unmarshal(line, &exportRecord); err == nil && exportRecord.Event.SiteID != "" {

@@ -44,9 +44,6 @@ type dialect struct {
 	// boolOr aggregates a boolean column. PostgreSQL has no MAX(boolean).
 	boolOr string
 
-	// falseLiteral is how a false boolean is written in a comparison.
-	falseLiteral string
-
 	maxOpenConns int
 }
 
@@ -69,7 +66,6 @@ func openDialect(dsn string) (dialect, error) {
 			schemaFile:       "schema/sqlite.sql",
 			timestampsAsText: true,
 			boolOr:           "MAX(bot_verified)",
-			falseLiteral:     "0",
 			// Writes already funnel through the async ledger's single
 			// goroutine, so the pool only serves concurrent readers, which WAL
 			// supports. A cap of 1 would make an export block every write.
@@ -84,7 +80,6 @@ func openDialect(dsn string) (dialect, error) {
 			schemaFile:     "schema/postgres.sql",
 			numberedParams: true,
 			boolOr:         "bool_or(bot_verified)",
-			falseLiteral:   "FALSE",
 			maxOpenConns:   8,
 		}, nil
 
@@ -99,7 +94,6 @@ func openDialect(dsn string) (dialect, error) {
 			dsn:          converted,
 			schemaFile:   "schema/mysql.sql",
 			boolOr:       "MAX(bot_verified)",
-			falseLiteral: "0",
 			maxOpenConns: 8,
 		}, nil
 
@@ -255,9 +249,9 @@ func asInt64(value any) (int64, error) {
 	case float64:
 		return int64(typed), nil
 	case []byte:
-		return strconv.ParseInt(strings.TrimSuffix(string(typed), ".0000"), 10, 64)
+		return parseInt64(string(typed))
 	case string:
-		return strconv.ParseInt(strings.TrimSuffix(typed, ".0000"), 10, 64)
+		return parseInt64(typed)
 	case bool:
 		if typed {
 			return 1, nil
@@ -268,4 +262,17 @@ func asInt64(value any) (int64, error) {
 	default:
 		return 0, fmt.Errorf("unsupported numeric type %T", value)
 	}
+}
+
+// parseInt64 accepts both integer and decimal renderings, since a DECIMAL
+// aggregate may carry a fractional part depending on the column it ran over.
+func parseInt64(value string) (int64, error) {
+	if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return parsed, nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, err
+	}
+	return int64(parsed), nil
 }

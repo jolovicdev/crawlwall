@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -153,6 +154,8 @@ func (l *sqlLedger) WriteEvents(ctx context.Context, events []Event) error {
 func (l *sqlLedger) Flush(context.Context) error { return nil }
 
 func (l *sqlLedger) Report(ctx context.Context, since time.Time) ([]ReportRow, error) {
+	// FALSE is a valid boolean literal on every supported engine (SQLite and
+	// MySQL evaluate it as 0), so only the aggregate differs per dialect.
 	query := fmt.Sprintf(`
 		SELECT
 			bot_id,
@@ -160,15 +163,15 @@ func (l *sqlLedger) Report(ctx context.Context, since time.Time) ([]ReportRow, e
 			bot_class,
 			%s AS verified,
 			COUNT(*) AS requests,
-			SUM(CASE WHEN action IN ('allow', 'rate_limit') AND enforced = %[2]s THEN 1 ELSE 0 END) AS allowed,
-			SUM(CASE WHEN enforced <> %[2]s THEN 1 ELSE 0 END) AS blocked,
-			SUM(CASE WHEN action IN ('block', 'rate_limit_exceeded') AND enforced = %[2]s THEN 1 ELSE 0 END) AS would_block,
+			SUM(CASE WHEN action IN ('allow', 'rate_limit') AND enforced = FALSE THEN 1 ELSE 0 END) AS allowed,
+			SUM(CASE WHEN enforced <> FALSE THEN 1 ELSE 0 END) AS blocked,
+			SUM(CASE WHEN action IN ('block', 'rate_limit_exceeded') AND enforced = FALSE THEN 1 ELSE 0 END) AS would_block,
 			SUM(CASE WHEN action = 'allow_metered' THEN 1 ELSE 0 END) AS metered
 		FROM crawl_events
 		WHERE ts >= ?
 		GROUP BY bot_id, bot_name, bot_class
 		ORDER BY requests DESC, bot_id ASC
-	`, l.dialect.boolOr, l.dialect.falseLiteral)
+	`, l.dialect.boolOr)
 
 	rows, err := l.db.QueryContext(ctx, l.dialect.rebind(query), l.dialect.timeArg(since))
 	if err != nil {
@@ -233,7 +236,7 @@ func (l *sqlLedger) ExportJSONL(ctx context.Context, w io.Writer) error {
 	}
 	defer rows.Close()
 
-	encoder := newJSONEncoder(w)
+	encoder := json.NewEncoder(w)
 	for rows.Next() {
 		event, err := scanEvent(rows)
 		if err != nil {

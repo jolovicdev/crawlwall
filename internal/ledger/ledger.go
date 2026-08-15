@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/jolovicdev/crawlwall/internal/bot"
 	"github.com/jolovicdev/crawlwall/internal/config"
 	"github.com/jolovicdev/crawlwall/internal/policy"
@@ -20,6 +22,9 @@ import (
 
 type EventWriter interface {
 	WriteEvent(context.Context, Event) error
+	// Flush blocks until previously written events are durable. Writes are
+	// buffered, so anything that reads the ledger back must flush first.
+	Flush(context.Context) error
 	Close() error
 }
 
@@ -169,14 +174,22 @@ func (e Event) ReceiptPayload() receipt.Payload {
 
 type noopLedger struct{}
 
-func Open(dsn string, enabled bool) (Ledger, error) {
+// Open returns the ledger backing the given DSN. Enabled ledgers buffer writes
+// off the request path; see asyncLedger.
+func Open(dsn string, enabled bool, logger *zap.Logger) (Ledger, error) {
 	if !enabled {
 		return noopLedger{}, nil
 	}
-	return openSQLite(dsn)
+
+	inner, err := openSQL(dsn)
+	if err != nil {
+		return nil, err
+	}
+	return newAsyncLedger(inner, logger), nil
 }
 
 func (noopLedger) WriteEvent(context.Context, Event) error { return nil }
+func (noopLedger) Flush(context.Context) error             { return nil }
 func (noopLedger) Report(context.Context, time.Time) ([]ReportRow, error) {
 	return nil, nil
 }

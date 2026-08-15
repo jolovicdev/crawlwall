@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"go.uber.org/zap"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,7 +15,7 @@ import (
 
 func TestSQLiteLedgerPruneDeletesOldEvents(t *testing.T) {
 	ctx := context.Background()
-	led, err := Open("sqlite://"+filepath.Join(t.TempDir(), "crawlwall.db"), true)
+	led, err := Open("sqlite://"+filepath.Join(t.TempDir(), "crawlwall.db"), true, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -52,7 +53,7 @@ func TestSQLiteLedgerPruneDeletesOldEvents(t *testing.T) {
 
 func TestSQLiteLedgerConcurrentWritesAllPersist(t *testing.T) {
 	ctx := context.Background()
-	led, err := Open("sqlite://"+filepath.Join(t.TempDir(), "crawlwall.db"), true)
+	led, err := Open("sqlite://"+filepath.Join(t.TempDir(), "crawlwall.db"), true, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -89,7 +90,7 @@ func TestSQLiteLedgerConcurrentWritesAllPersist(t *testing.T) {
 
 func TestSQLiteLedgerReportSeparatesEnforcedFromShadow(t *testing.T) {
 	ctx := context.Background()
-	led, err := Open("sqlite://"+filepath.Join(t.TempDir(), "crawlwall.db"), true)
+	led, err := Open("sqlite://"+filepath.Join(t.TempDir(), "crawlwall.db"), true, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -141,7 +142,7 @@ func TestSQLiteLedgerMigratesEnforcedColumn(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "crawlwall.db")
 
-	led, err := Open("sqlite://"+path, true)
+	led, err := Open("sqlite://"+path, true, zap.NewNop())
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -165,7 +166,7 @@ func TestSQLiteLedgerMigratesEnforcedColumn(t *testing.T) {
 	}
 
 	// Reopening should re-add the column via migration and stay usable.
-	led2, err := Open("sqlite://"+path, true)
+	led2, err := Open("sqlite://"+path, true, zap.NewNop())
 	if err != nil {
 		t.Fatalf("reopen Open() error = %v", err)
 	}

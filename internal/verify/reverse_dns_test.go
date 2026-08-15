@@ -15,11 +15,7 @@ func TestReverseDNSVerifierCachesResultsByIP(t *testing.T) {
 			"crawl-66-249-66-1.googlebot.com": {{IP: net.ParseIP("66.249.66.1")}},
 		},
 	}
-	verifier := &reverseDNSVerifier{
-		allowedSuffixes: []string{".googlebot.com"},
-		resolver:        resolver,
-		cache:           newReverseDNSCache(reverseDNSCacheMaxEntries, reverseDNSCacheTTL),
-	}
+	verifier := newTestReverseDNSVerifier(resolver, ".googlebot.com")
 
 	ip := net.ParseIP("66.249.66.1")
 	for i := 0; i < 2; i++ {
@@ -44,11 +40,7 @@ func TestReverseDNSVerifierMissingPTRIsUnverifiedAndCached(t *testing.T) {
 	resolver := &fakeDNSResolver{
 		ptrErr: &net.DNSError{Err: "no such host", Name: "198.51.100.10", IsNotFound: true},
 	}
-	verifier := &reverseDNSVerifier{
-		allowedSuffixes: []string{".googlebot.com"},
-		resolver:        resolver,
-		cache:           newReverseDNSCache(reverseDNSCacheMaxEntries, reverseDNSCacheTTL),
-	}
+	verifier := newTestReverseDNSVerifier(resolver, ".googlebot.com")
 
 	ip := net.ParseIP("198.51.100.10")
 	for i := 0; i < 2; i++ {
@@ -73,11 +65,7 @@ func TestReverseDNSVerifierResolverFailureReturnsError(t *testing.T) {
 	resolver := &fakeDNSResolver{
 		ptrErr: &net.DNSError{Err: "server misbehaving", IsTimeout: true},
 	}
-	verifier := &reverseDNSVerifier{
-		allowedSuffixes: []string{".googlebot.com"},
-		resolver:        resolver,
-		cache:           newReverseDNSCache(reverseDNSCacheMaxEntries, reverseDNSCacheTTL),
-	}
+	verifier := newTestReverseDNSVerifier(resolver, ".googlebot.com")
 
 	ip := net.ParseIP("198.51.100.10")
 	for i := 0; i < 2; i++ {
@@ -98,11 +86,7 @@ func TestReverseDNSVerifierForwardNotFoundIsUnverified(t *testing.T) {
 		},
 		forwardErr: &net.DNSError{Err: "no such host", IsNotFound: true},
 	}
-	verifier := &reverseDNSVerifier{
-		allowedSuffixes: []string{".googlebot.com"},
-		resolver:        resolver,
-		cache:           newReverseDNSCache(reverseDNSCacheMaxEntries, reverseDNSCacheTTL),
-	}
+	verifier := newTestReverseDNSVerifier(resolver, ".googlebot.com")
 
 	result, err := verifier.Verify(context.Background(), net.ParseIP("66.249.66.1"))
 	if err != nil {
@@ -139,4 +123,12 @@ func (r *fakeDNSResolver) LookupIPAddr(_ context.Context, host string) ([]net.IP
 		return nil, r.forwardErr
 	}
 	return r.forward[host], nil
+}
+
+// newTestReverseDNSVerifier builds a verifier through the real constructor, so
+// suffix normalization is exercised, then swaps in a fake resolver.
+func newTestReverseDNSVerifier(resolver dnsResolver, suffixes ...string) *reverseDNSVerifier {
+	verifier := newReverseDNSVerifier(suffixes).(*reverseDNSVerifier)
+	verifier.resolver = resolver
+	return verifier
 }

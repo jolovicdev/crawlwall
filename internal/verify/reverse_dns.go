@@ -7,6 +7,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
+
+	"github.com/jolovicdev/crawlwall/internal/lru"
 )
 
 const (
@@ -20,14 +24,24 @@ type dnsResolver interface {
 }
 
 type reverseDNSVerifier struct {
+	// allowedSuffixes is normalized at construction: lowercased with any
+	// leading dot stripped, so the request path only compares bytes.
 	allowedSuffixes []string
 	resolver        dnsResolver
 	cache           *reverseDNSCache
+	lookupGroup     singleflight.Group
 }
 
 func newReverseDNSVerifier(allowedSuffixes []string) Verifier {
+	normalized := make([]string, 0, len(allowedSuffixes))
+	for _, suffix := range allowedSuffixes {
+		if suffix = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(suffix)), "."); suffix != "" {
+			normalized = append(normalized, suffix)
+		}
+	}
+
 	return &reverseDNSVerifier{
-		allowedSuffixes: allowedSuffixes,
+		allowedSuffixes: normalized,
 		resolver:        net.DefaultResolver,
 		cache:           newReverseDNSCache(reverseDNSCacheMaxEntries, reverseDNSCacheTTL),
 	}
@@ -39,12 +53,19 @@ func (v *reverseDNSVerifier) Verify(ctx context.Context, ip net.IP) (Result, err
 		return result, nil
 	}
 
-	result, err := v.lookup(ctx, ip)
-	if err != nil {
-		return result, err
-	}
-	v.cache.set(key, result)
-	return result, nil
+	// Requests from one IP arrive in bursts, and a resolver round trip is slow
+	// relative to a request. Share one in-flight lookup per IP instead of
+	// opening a query per request.
+	out, err, _ := v.lookupGroup.Do(key, func() (any, error) {
+		result, lookupErr := v.lookup(ctx, ip)
+		if lookupErr == nil {
+			v.cache.set(key, result)
+		}
+		return result, lookupErr
+	})
+
+	result, _ := out.(Result)
+	return result, err
 }
 
 func (v *reverseDNSVerifier) lookup(ctx context.Context, ip net.IP) (Result, error) {
@@ -98,10 +119,15 @@ func isNotFoundDNSError(err error) bool {
 	return false
 }
 
+// allowed reports whether host is the allowed suffix itself or a label beneath
+// it. The dot boundary matters: a plain HasSuffix would let evilgooglebot.com
+// pass as .googlebot.com.
 func (v *reverseDNSVerifier) allowed(host string) bool {
 	for _, suffix := range v.allowedSuffixes {
-		normalized := strings.TrimPrefix(strings.ToLower(suffix), ".")
-		if host == normalized || strings.HasSuffix(host, "."+normalized) {
+		if host == suffix {
+			return true
+		}
+		if len(host) > len(suffix) && host[len(host)-len(suffix)-1] == '.' && strings.HasSuffix(host, suffix) {
 			return true
 		}
 	}
@@ -161,20 +187,20 @@ func (c *reverseDNSCache) set(key string, result Result) {
 	}
 
 	if len(c.items) > c.maxEntries {
-		c.evictOldest()
+		c.evict(now)
 	}
 }
 
-func (c *reverseDNSCache) evictOldest() {
-	var oldestKey string
-	var oldestAccess time.Time
+// evict drops expired entries, then trims the least recently used ones. A
+// crawler flood from many spoofed IPs holds the cache at its cap; see lru.Trim.
+func (c *reverseDNSCache) evict(now time.Time) {
 	for key, entry := range c.items {
-		if oldestKey == "" || entry.lastAccess.Before(oldestAccess) {
-			oldestKey = key
-			oldestAccess = entry.lastAccess
+		if now.After(entry.expiresAt) {
+			delete(c.items, key)
 		}
 	}
-	if oldestKey != "" {
-		delete(c.items, oldestKey)
-	}
+
+	lru.Trim(c.items, c.maxEntries, func(entry reverseDNSCacheEntry) time.Time {
+		return entry.lastAccess
+	})
 }

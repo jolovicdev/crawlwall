@@ -742,7 +742,7 @@ func newTestModuleWithPolicy(t *testing.T, ipRangesResponse string, buildPolicy 
 		t.Fatalf("Validate() error = %v", err)
 	}
 
-	led, err := ledger.Open("sqlite://"+dbPath, true)
+	led, err := ledger.Open("sqlite://"+dbPath, true, zap.NewNop())
 	if err != nil {
 		t.Fatalf("ledger.Open() error = %v", err)
 	}

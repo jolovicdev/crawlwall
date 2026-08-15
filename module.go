@@ -80,7 +80,7 @@ func (m *Crawlwall) Provision(ctx caddy.Context) error {
 		return err
 	}
 
-	led, err := ledger.Open(m.LedgerDSN, cfg.Ledger.Enabled)
+	led, err := ledger.Open(m.LedgerDSN, cfg.Ledger.Enabled, m.logger)
 	if err != nil {
 		return fmt.Errorf("open ledger: %w", err)
 	}

@@ -428,7 +428,7 @@ func runLedger(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "report":
 		fs := flag.NewFlagSet("ledger report", flag.ContinueOnError)
-		dbPath := fs.String("db", "./crawlwall.db", "sqlite database path")
+		dbPath := fs.String("db", "./crawlwall.db", "ledger DSN or sqlite path")
 		since := fs.String("since", "24h", "time window")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -439,7 +439,7 @@ func runLedger(ctx context.Context, args []string) error {
 			return err
 		}
 
-		led, err := ledger.Open("sqlite://"+strings.TrimPrefix(*dbPath, "sqlite://"), true)
+		led, err := openLedger(*dbPath)
 		if err != nil {
 			return err
 		}
@@ -454,7 +454,7 @@ func runLedger(ctx context.Context, args []string) error {
 
 	case "export":
 		fs := flag.NewFlagSet("ledger export", flag.ContinueOnError)
-		dbPath := fs.String("db", "./crawlwall.db", "sqlite database path")
+		dbPath := fs.String("db", "./crawlwall.db", "ledger DSN or sqlite path")
 		format := fs.String("format", "jsonl", "export format")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -463,7 +463,7 @@ func runLedger(ctx context.Context, args []string) error {
 			return fmt.Errorf("unsupported export format %q", *format)
 		}
 
-		led, err := ledger.Open("sqlite://"+strings.TrimPrefix(*dbPath, "sqlite://"), true)
+		led, err := openLedger(*dbPath)
 		if err != nil {
 			return err
 		}
@@ -472,7 +472,7 @@ func runLedger(ctx context.Context, args []string) error {
 		return led.ExportJSONL(ctx, os.Stdout)
 	case "vacuum":
 		fs := flag.NewFlagSet("ledger vacuum", flag.ContinueOnError)
-		dbPath := fs.String("db", "./crawlwall.db", "sqlite database path")
+		dbPath := fs.String("db", "./crawlwall.db", "ledger DSN or sqlite path")
 		olderThan := fs.String("older-than", "", "delete events older than this duration, for example 720h or 30d")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -489,7 +489,7 @@ func runLedger(ctx context.Context, args []string) error {
 			return fmt.Errorf("--older-than must be positive")
 		}
 
-		led, err := ledger.Open("sqlite://"+strings.TrimPrefix(*dbPath, "sqlite://"), true)
+		led, err := openLedger(*dbPath)
 		if err != nil {
 			return err
 		}
@@ -664,6 +664,15 @@ func writeJSON(w io.Writer, value any) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
+}
+
+// openLedger accepts a full DSN (sqlite://, postgres://, mysql://) or a bare
+// path, which stays shorthand for sqlite so existing invocations keep working.
+func openLedger(dsn string) (ledger.Ledger, error) {
+	if !strings.Contains(dsn, "://") {
+		dsn = "sqlite://" + dsn
+	}
+	return ledger.Open(dsn, true, zap.NewNop())
 }
 
 func netParse(value string) net.IP {

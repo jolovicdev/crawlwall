@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/jolovicdev/crawlwall/internal/lru"
 )
 
 const (
@@ -68,10 +70,10 @@ func (l *Limiter) allowAt(key string, rpm int, now time.Time) bool {
 	return limiter.AllowN(now, 1)
 }
 
-// evictIdle drops entries that have not been used within the TTL, then evicts
-// the least recently used entries until the map is back within its cap. Without
-// this, a high-cardinality key such as request.ip would grow the map without
-// bound. Callers must hold l.mu.
+// evictIdle drops entries that have not been used within the TTL, then trims
+// the least recently used ones. Without this, a high-cardinality key such as
+// request.ip would grow the map without bound; see lru.Trim for why a batch is
+// reclaimed. Callers must hold l.mu.
 func (l *Limiter) evictIdle(now time.Time) {
 	for key, entry := range l.entries {
 		if now.Sub(entry.lastAccess) > l.ttl {
@@ -79,18 +81,7 @@ func (l *Limiter) evictIdle(now time.Time) {
 		}
 	}
 
-	for len(l.entries) > l.maxEntries {
-		var oldestKey string
-		var oldestAccess time.Time
-		for key, entry := range l.entries {
-			if oldestKey == "" || entry.lastAccess.Before(oldestAccess) {
-				oldestKey = key
-				oldestAccess = entry.lastAccess
-			}
-		}
-		if oldestKey == "" {
-			break
-		}
-		delete(l.entries, oldestKey)
-	}
+	lru.Trim(l.entries, l.maxEntries, func(entry limiterEntry) time.Time {
+		return entry.lastAccess
+	})
 }

@@ -1,6 +1,6 @@
 package policy
 
-import "github.com/jolovicdev/crawlwall/internal/config"
+import "github.com/jolovicdev/crawlwall/v2/internal/config"
 
 type Decision struct {
 	RuleID string

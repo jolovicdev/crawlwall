@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
 )
 
 // A rule whose expression is not a boolean never matches. For a block rule that

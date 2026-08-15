@@ -12,7 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // postgres:// ledgers
 	_ "modernc.org/sqlite"             // sqlite:// ledgers, pure Go so xcaddy builds stay cgo-free
 
-	"github.com/jolovicdev/crawlwall/internal/receipt"
+	"github.com/jolovicdev/crawlwall/v2/internal/receipt"
 )
 
 // sqlLedger is the storage backend for every supported database. Statements are

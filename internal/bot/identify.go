@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
 )
 
 // matcher pairs the lowercased user-agent needles for one bot with the result

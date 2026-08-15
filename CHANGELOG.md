@@ -65,6 +65,11 @@ correctness and hot-path fixes.
 
 ### Changed
 
+- The module path is now `github.com/jolovicdev/crawlwall/v2`, as Go semantic
+  import versioning requires for a 2.x release; without it the `v2.0.0` tag
+  would be invisible to `go get` and `xcaddy`. Build commands in the README use
+  the new path. The Caddy module ID (`http.handlers.crawlwall`), the Caddyfile
+  directive, and the policy format are unchanged.
 - Bot identification precomputes its matchers and folds ASCII case in place, so
   the request path allocates nothing and is roughly 15-30% faster.
 - Concurrent reverse DNS lookups for one IP share a single query.

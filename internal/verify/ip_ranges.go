@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
-	"github.com/jolovicdev/crawlwall/internal/config"
-	"github.com/jolovicdev/crawlwall/internal/version"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/version"
 )
 
 const (

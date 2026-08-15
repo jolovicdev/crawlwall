@@ -1,6 +1,6 @@
 # CrawlWall — Block AI Crawlers at the Edge with Caddy
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/jolovicdev/crawlwall.svg)](https://pkg.go.dev/github.com/jolovicdev/crawlwall)
+[![Go Reference](https://pkg.go.dev/badge/github.com/jolovicdev/crawlwall/v2.svg)](https://pkg.go.dev/github.com/jolovicdev/crawlwall/v2)
 [![Go version](https://img.shields.io/github/go-mod/go-version/jolovicdev/crawlwall)](go.mod)
 [![License: MIT](https://img.shields.io/github/license/jolovicdev/crawlwall)](LICENSE)
 
@@ -77,7 +77,7 @@ The goal is not cleverness. It is being explicit, inspectable, and replaceable.
 **1. Scaffold a project**
 
 ```sh
-go run github.com/jolovicdev/crawlwall/cmd/crawlwall@latest init --profile minimal
+go run github.com/jolovicdev/crawlwall/v2/cmd/crawlwall@latest init --profile minimal
 ```
 
 That writes `crawlwall.yaml`, a `Caddyfile`, a `.gitignore`, and an Ed25519 key
@@ -86,7 +86,7 @@ pair for receipts.
 **2. Build Caddy with the module**
 
 ```sh
-xcaddy build --with github.com/jolovicdev/crawlwall@latest
+xcaddy build --with github.com/jolovicdev/crawlwall/v2@latest
 ```
 
 **3. Point the Caddyfile at your policy**

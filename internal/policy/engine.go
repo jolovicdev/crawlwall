@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/jolovicdev/crawlwall/internal/bot"
-	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/bot"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
 )
 
 type Engine struct {

@@ -1,6 +1,6 @@
 package bot
 
-import "github.com/jolovicdev/crawlwall/internal/config"
+import "github.com/jolovicdev/crawlwall/v2/internal/config"
 
 func NewRegistry(cfgs []config.BotConfig) []Registered {
 	out := make([]Registered, 0, len(cfgs))

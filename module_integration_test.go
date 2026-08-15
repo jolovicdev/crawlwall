@@ -771,6 +771,11 @@ func newTestModuleWithPolicy(t *testing.T, ipRangesResponse string, buildPolicy 
 		limiter:  ratelimit.New(),
 		signer:   signer,
 	}
+	// Same call Provision makes, so the tests exercise the real setup path.
+	if err := mod.setupRobots(cfg); err != nil {
+		t.Fatalf("setupRobots() error = %v", err)
+	}
+
 	return mod, publicKey
 }
 
@@ -901,4 +906,163 @@ rules:
 	if wouldBlock == 0 {
 		t.Fatalf("no rate_limit_exceeded records: shadow mode did not evaluate the limiter")
 	}
+}
+
+func TestServeHTTPServesRobotsTxtFromPolicy(t *testing.T) {
+	mod, _ := newTestModuleWithPolicy(t, `{"prefixes":[{"ipv4Prefix":"20.125.66.80/28"}]}`, robotsPolicy)
+	defer closeLedger(t, mod)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://localhost/robots.txt", nil)
+	request.Header.Set("User-Agent", "GPTBot/1.1")
+	request.RemoteAddr = "203.0.113.9:1234"
+
+	calledNext := false
+	if err := mod.ServeHTTP(recorder, request, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
+		calledNext = true
+		return nil
+	})); err != nil {
+		t.Fatalf("ServeHTTP() error = %v", err)
+	}
+
+	if calledNext {
+		t.Fatalf("robots.txt should be served by crawlwall, not passed upstream")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("recorder.Code = %d, want 200", recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+
+	body := recorder.Body.String()
+	// The unknown group is denied the protected path, and GPTBot is not.
+	if !strings.Contains(body, "User-agent: *\nDisallow: /archive\n") {
+		t.Fatalf("robots.txt missing the unknown-crawler denial:\n%s", body)
+	}
+	if !strings.Contains(body, "User-agent: GPTBot\nDisallow:\n") {
+		t.Fatalf("robots.txt missing the verified GPTBot allowance:\n%s", body)
+	}
+
+	// The fetch is still auditable.
+	records := exportedRecords(t, mod)
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want the robots.txt fetch to be recorded", len(records))
+	}
+	if records[0].Event.RuleID != "runtime.robots_txt" || records[0].Event.Path != "/robots.txt" {
+		t.Fatalf("event = %+v, want a runtime.robots_txt record", records[0].Event)
+	}
+}
+
+// A crawler that cannot read robots.txt assumes everything is fetchable, so the
+// file is served even when policy would otherwise block that client.
+func TestServeHTTPServesRobotsTxtEvenWhenPolicyWouldBlock(t *testing.T) {
+	mod, _ := newTestModuleWithPolicy(t, `{"prefixes":[{"ipv4Prefix":"20.125.66.80/28"}]}`, robotsPolicy)
+	defer closeLedger(t, mod)
+
+	for _, path := range []string{"/robots.txt", "/archive/a"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil)
+		request.Header.Set("User-Agent", "randomscraper/1.0")
+		request.RemoteAddr = "203.0.113.9:1234"
+
+		if err := mod.ServeHTTP(recorder, request, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
+			w.WriteHeader(http.StatusOK)
+			return nil
+		})); err != nil {
+			t.Fatalf("ServeHTTP(%s) error = %v", path, err)
+		}
+
+		want := http.StatusOK
+		if path == "/archive/a" {
+			want = http.StatusForbidden
+		}
+		if recorder.Code != want {
+			t.Fatalf("ServeHTTP(%s) status = %d, want %d", path, recorder.Code, want)
+		}
+	}
+}
+
+func TestServeHTTPRobotsTxtDisabledByDefault(t *testing.T) {
+	// The default policy leaves robots.serve unset, so the path is upstream's.
+	mod, _ := newTestModule(t, `{"prefixes":[{"ipv4Prefix":"20.125.66.80/28"}]}`)
+	defer closeLedger(t, mod)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://localhost/robots.txt", nil)
+	request.RemoteAddr = "203.0.113.9:1234"
+
+	calledNext := false
+	if err := mod.ServeHTTP(recorder, request, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
+		calledNext = true
+		w.WriteHeader(http.StatusOK)
+		return nil
+	})); err != nil {
+		t.Fatalf("ServeHTTP() error = %v", err)
+	}
+	if !calledNext {
+		t.Fatalf("robots.txt should reach the upstream handler when robots.serve is off")
+	}
+}
+
+func robotsPolicy(keyPath, rangesURL string) string {
+	return strings.TrimSpace(`
+version: crawlwall.io/v1
+
+site:
+  id: test-site
+  host: localhost
+  mode: enforce
+
+runtime:
+  fail_mode: allow
+  default_action:
+    type: allow
+
+ledger:
+  enabled: true
+
+receipts:
+  enabled: false
+
+robots:
+  serve: true
+  sitemaps:
+    - "https://localhost/sitemap.xml"
+
+bots:
+  - id: gptbot
+    name: GPTBot
+    class: ai_training
+    match:
+      user_agents:
+        - "GPTBot"
+    verify:
+      type: ip_ranges
+      sources:
+        - "`+rangesURL+`"
+      refresh: 1h
+  - id: unknown
+    name: Unknown
+    class: unknown
+    match:
+      default: true
+    verify:
+      type: none
+
+sets:
+  protected_paths:
+    - "/archive"
+
+rules:
+  - id: block_unknown_protected
+    priority: 900
+    when: >
+      bot.class == "unknown" &&
+      sets.protected_paths.exists(p, request.path.startsWith(p))
+    action:
+      type: block
+      status: 403
+      reason: unknown_crawler_protected_path
+`) + "\n"
 }

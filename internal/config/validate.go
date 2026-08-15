@@ -36,6 +36,14 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, sitemap := range c.Robots.Sitemaps {
+		// A relative sitemap is silently ignored by crawlers, so reject it here
+		// rather than emit a line that does nothing.
+		if !strings.HasPrefix(sitemap, "http://") && !strings.HasPrefix(sitemap, "https://") {
+			return fmt.Errorf("robots.sitemaps entries must be absolute URLs, got %q", sitemap)
+		}
+	}
+
 	if len(c.Bots) == 0 {
 		return fmt.Errorf("at least one bot definition is required")
 	}

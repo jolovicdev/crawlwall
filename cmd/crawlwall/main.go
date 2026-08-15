@@ -24,6 +24,7 @@ import (
 	"github.com/jolovicdev/crawlwall/internal/ledger"
 	"github.com/jolovicdev/crawlwall/internal/policy"
 	"github.com/jolovicdev/crawlwall/internal/receipt"
+	"github.com/jolovicdev/crawlwall/internal/robots"
 	"github.com/jolovicdev/crawlwall/internal/scaffold"
 	"github.com/jolovicdev/crawlwall/internal/verify"
 	"github.com/jolovicdev/crawlwall/internal/version"
@@ -54,6 +55,8 @@ func run(ctx context.Context, args []string) error {
 		return runReceipts(ctx, args[1:])
 	case "verifiers":
 		return runVerifiers(ctx, args[1:])
+	case "robots":
+		return runRobots(args[1:])
 	case "version":
 		fmt.Println(version.Version)
 		return nil
@@ -506,6 +509,47 @@ func runLedger(ctx context.Context, args []string) error {
 	}
 }
 
+// runRobots renders robots.txt from the policy. Writing it to a file is a
+// snapshot that can drift; `robots.serve: true` in the policy keeps the handler
+// answering from the live policy instead, which is the drift-free option.
+func runRobots(args []string) error {
+	fs := flag.NewFlagSet("robots", flag.ContinueOnError)
+	configPath := fs.String("config", "./crawlwall.yaml", "path to crawlwall yaml")
+	outPath := fs.String("out", "", "write to this file instead of stdout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.LoadFile(*configPath)
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	result, err := robots.Generate(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Warnings go to stderr so redirecting stdout to robots.txt stays clean
+	// while the gaps stay visible.
+	for _, warning := range result.Warnings {
+		fmt.Fprintln(os.Stderr, "warning:", warning)
+	}
+
+	if *outPath == "" {
+		_, err := io.WriteString(os.Stdout, result.Body)
+		return err
+	}
+	if err := os.WriteFile(*outPath, []byte(result.Body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", *outPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "wrote %s\n", *outPath)
+	return nil
+}
+
 func runVerifiers(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("verifiers command is required")
@@ -715,6 +759,7 @@ func usage() {
   crawlwall policy eval --config ./crawlwall.yaml --ua "GPTBot/1.1" --path "/archive/a"
   crawlwall policy test --config ./crawlwall.yaml --fixtures ./examples/policy-fixtures.yaml
   crawlwall verifiers status --config ./crawlwall.yaml
+  crawlwall robots --config ./crawlwall.yaml --out ./robots.txt
   crawlwall ledger report --db ./crawlwall.db --since 24h
   crawlwall ledger export --db ./crawlwall.db --format jsonl
   crawlwall ledger vacuum --db ./crawlwall.db --older-than 30d

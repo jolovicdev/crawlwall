@@ -164,6 +164,11 @@ receipts:
     type: ed25519
     key_file: ./crawlwall.key
 
+# Serve /robots.txt derived from the rules below, so the advisory layer cannot
+# drift out of sync with what is actually enforced.
+robots:
+  serve: true
+
 bots:
   - id: googlebot
     name: Googlebot

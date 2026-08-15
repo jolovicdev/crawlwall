@@ -21,6 +21,7 @@ import (
 	"github.com/jolovicdev/crawlwall/internal/policy"
 	"github.com/jolovicdev/crawlwall/internal/ratelimit"
 	"github.com/jolovicdev/crawlwall/internal/receipt"
+	"github.com/jolovicdev/crawlwall/internal/robots"
 	"github.com/jolovicdev/crawlwall/internal/verify"
 	"github.com/jolovicdev/crawlwall/internal/version"
 )
@@ -32,6 +33,8 @@ const (
 	actionRateLimitExceeded = "rate_limit_exceeded"
 
 	ledgerWriteTimeout = 5 * time.Second
+
+	robotsPath = "/robots.txt"
 )
 
 func init() {
@@ -43,14 +46,15 @@ type Crawlwall struct {
 	LedgerDSN  string `json:"ledger_dsn,omitempty"`
 	FailMode   string `json:"fail_mode,omitempty"`
 
-	logger   *zap.Logger
-	config   *config.Config
-	bots     *bot.Identifier
-	verifier *verify.Service
-	policy   *policy.Engine
-	ledger   ledger.Ledger
-	limiter  *ratelimit.Limiter
-	signer   *receipt.Signer
+	logger    *zap.Logger
+	config    *config.Config
+	bots      *bot.Identifier
+	verifier  *verify.Service
+	policy    *policy.Engine
+	ledger    ledger.Ledger
+	limiter   *ratelimit.Limiter
+	signer    *receipt.Signer
+	robotsTxt []byte
 }
 
 func (Crawlwall) CaddyModule() caddy.ModuleInfo {
@@ -97,6 +101,11 @@ func (m *Crawlwall) Provision(ctx caddy.Context) error {
 		return fmt.Errorf("load receipt signer: %w", err)
 	}
 
+	if err := m.setupRobots(cfg); err != nil {
+		_ = led.Close()
+		return err
+	}
+
 	m.config = cfg
 	m.bots = bot.NewIdentifier(cfg.Bots)
 	m.verifier = verify.NewService(cfg.Bots, m.logger)
@@ -121,10 +130,41 @@ func (m *Crawlwall) Provision(ctx caddy.Context) error {
 	return nil
 }
 
+// setupRobots renders robots.txt once, when the policy asks the handler to
+// serve it. Rendering here rather than per request is safe because the policy
+// cannot change without a reload, and a reload re-provisions the module, which
+// is the whole point: the advisory file cannot go stale relative to the rules
+// being enforced.
+func (m *Crawlwall) setupRobots(cfg *config.Config) error {
+	if !cfg.Robots.Serve {
+		return nil
+	}
+
+	generated, err := robots.Generate(cfg)
+	if err != nil {
+		return fmt.Errorf("generate robots.txt: %w", err)
+	}
+	m.robotsTxt = []byte(generated.Body)
+
+	for _, warning := range generated.Warnings {
+		m.logger.Warn("crawlwall robots.txt cannot express a policy rule",
+			zap.String("detail", warning),
+		)
+	}
+	return nil
+}
+
 func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	start := time.Now()
 	remoteIP := remoteIPFromRequest(r)
 	identifiedBot := m.bots.Identify(r.UserAgent())
+
+	// Only GET and HEAD are answered here; anything else at this path is not a
+	// crawler reading policy, so it goes through normal handling.
+	if m.robotsTxt != nil && r.URL.Path == robotsPath && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		m.serveRobots(w, r, start, remoteIP, identifiedBot)
+		return nil
+	}
 
 	verification, verifyErr := m.verifier.Verify(r.Context(), verify.Input{
 		Bot:      identifiedBot,
@@ -242,6 +282,34 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 	m.writeLedgerAndReceipt(r.Context(), &event)
 
 	return err
+}
+
+// serveRobots answers /robots.txt from the policy the edge is enforcing.
+//
+// It runs before verification and before policy evaluation on purpose. A
+// crawler that cannot read robots.txt assumes everything is fetchable, so
+// blocking this one path is self-defeating; serving it early also means a
+// robots.txt fetch never triggers a DNS lookup. The fetch is still recorded,
+// because knowing which crawlers read the file is useful signal.
+func (m *Crawlwall) serveRobots(w http.ResponseWriter, r *http.Request, start time.Time, remoteIP net.IP, identifiedBot bot.Identified) {
+	verification := verify.Result{Type: "none", Reason: "robots_txt"}
+	decision := policy.Decision{
+		RuleID: "runtime.robots_txt",
+		Action: config.Action{Type: config.ActionAllow, Reason: "robots_txt"},
+	}
+
+	event := ledger.EventFromRequest(start, r, remoteIP, identifiedBot, verification, decision, m.config.Site.ID)
+	event.Status = http.StatusOK
+	event.BytesSent = int64(len(m.robotsTxt))
+	event.DurationMS = time.Since(start).Milliseconds()
+	m.writeLedgerAndReceipt(r.Context(), &event)
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(m.robotsTxt)))
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(m.robotsTxt)
+	}
 }
 
 // retryAfterSeconds is how long a limited client should wait for its next

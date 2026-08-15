@@ -14,6 +14,10 @@ import (
 	"github.com/jolovicdev/crawlwall/internal/config"
 )
 
+// VerifyTimeout bounds one request-path verification, including any inline
+// DNS lookup or range fetch it has to make.
+const VerifyTimeout = 5 * time.Second
+
 type Input struct {
 	Bot      bot.Identified
 	RemoteIP net.IP
@@ -149,6 +153,14 @@ func (s *Service) Verify(ctx context.Context, input Input) (Result, error) {
 			Reason:   "verifier_not_found",
 		}, fmt.Errorf("no verifier registered for bot %q", input.Bot.ID)
 	}
+
+	// Verification must not inherit the request's cancellation. DNS lookups and
+	// range fetches are shared across requests, so one client hanging up would
+	// otherwise fail verification for every request waiting on the same lookup.
+	// It must not inherit "no deadline" either: net.Resolver has no timeout of
+	// its own, so a slow PTR chain would pin the goroutine indefinitely.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), VerifyTimeout)
+	defer cancel()
 
 	result, err := verifier.Verify(ctx, input.RemoteIP)
 	if err != nil {

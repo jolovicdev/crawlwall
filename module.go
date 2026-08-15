@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,15 @@ import (
 	"github.com/jolovicdev/crawlwall/internal/receipt"
 	"github.com/jolovicdev/crawlwall/internal/verify"
 	"github.com/jolovicdev/crawlwall/internal/version"
+)
+
+const (
+	// actionRateLimitExceeded is the ledger action recorded when a request is
+	// over its limit, in enforce and shadow mode alike. `ledger report` counts
+	// it as blocked or would-block depending on Enforced.
+	actionRateLimitExceeded = "rate_limit_exceeded"
+
+	ledgerWriteTimeout = 5 * time.Second
 )
 
 func init() {
@@ -184,7 +194,6 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 	}
 
 	event := ledger.EventFromRequest(start, r, remoteIP, identifiedBot, verification, decision, m.config.Site.ID)
-	event.DurationMS = time.Since(start).Milliseconds()
 
 	switch decision.Action.Type {
 	case config.ActionBlock:
@@ -201,15 +210,21 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			return nil
 		}
 	case config.ActionRateLimit:
-		if enforce && decision.Action.Limit != nil && !m.limiter.Allow(decision.Action.Limit.ResolvedKey, decision.Action.Limit.RPM) {
-			event.Status = http.StatusTooManyRequests
-			event.Action = "rate_limit_exceeded"
-			event.ActionReason = "rate_limit_exceeded"
-			event.Enforced = true
-			event.DurationMS = time.Since(start).Milliseconds()
-			m.writeLedgerAndReceipt(r.Context(), &event)
-			http.Error(w, "rate limited by crawlwall", http.StatusTooManyRequests)
-			return nil
+		// The limiter runs in shadow mode too. Its whole purpose is to answer
+		// "what would enforcing do", and skipping it would report every
+		// over-limit request as allowed.
+		if decision.Action.Limit != nil && !m.limiter.Allow(decision.Action.Limit.ResolvedKey, decision.Action.Limit.RPM) {
+			event.Action = actionRateLimitExceeded
+			event.ActionReason = actionRateLimitExceeded
+			if enforce {
+				event.Status = http.StatusTooManyRequests
+				event.Enforced = true
+				event.DurationMS = time.Since(start).Milliseconds()
+				m.writeLedgerAndReceipt(r.Context(), &event)
+				w.Header().Set("Retry-After", retryAfterSeconds(decision.Action.Limit.RPM))
+				http.Error(w, "rate limited by crawlwall", http.StatusTooManyRequests)
+				return nil
+			}
 		}
 	}
 
@@ -227,6 +242,16 @@ func (m *Crawlwall) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 	m.writeLedgerAndReceipt(r.Context(), &event)
 
 	return err
+}
+
+// retryAfterSeconds is how long a limited client should wait for its next
+// token, rounded up so a compliant crawler does not come back early.
+func retryAfterSeconds(rpm int) string {
+	seconds := 1
+	if rpm > 0 && rpm < 60 {
+		seconds = (60 + rpm - 1) / rpm
+	}
+	return strconv.Itoa(seconds)
 }
 
 func (m *Crawlwall) Cleanup() error {
@@ -253,6 +278,12 @@ func (m *Crawlwall) writeLedgerAndReceipt(ctx context.Context, event *ledger.Eve
 			event.ReceiptSignature = envelope.Signature
 		}
 	}
+
+	// The audit write must outlive the request. A crawler that hangs up
+	// mid-response is exactly the traffic worth recording, and inheriting the
+	// request's cancellation would drop that event.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
+	defer cancel()
 
 	if err := m.ledger.WriteEvent(ctx, *event); err != nil {
 		m.logger.Warn("crawlwall ledger write failed", zap.Error(err))

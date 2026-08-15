@@ -13,6 +13,27 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/internal/version"
+)
+
+const (
+	// maxSourceBytes caps how much of a range document is read. Sources are
+	// third-party URLs; an unbounded io.ReadAll would let one of them exhaust
+	// memory.
+	maxSourceBytes = 8 << 20
+
+	// fetchBackoff throttles request-path refetches after a failure. Without
+	// it an unreachable source costs every single request a full client
+	// timeout and hammers the source. The background refresher is unaffected
+	// and keeps retrying on its own interval.
+	fetchBackoff = 30 * time.Second
+
+	// A source that publishes a wildcard prefix such as 0.0.0.0/0 would verify
+	// every client as the bot. Crawler operators publish far narrower blocks,
+	// so anything this broad is treated as corrupt and dropped. The bar is set
+	// low enough that no plausible real publication trips it.
+	minIPv4PrefixBits = 8
+	minIPv6PrefixBits = 16
 )
 
 type ipRangesVerifier struct {
@@ -94,6 +115,15 @@ func (v *ipRangesVerifier) loadNetworks(ctx context.Context) ([]*net.IPNet, bool
 		return networks, false, nil
 	}
 
+	// A recent fetch already failed. Serve stale if policy allows it, otherwise
+	// fail fast rather than making every request wait on the same dead source.
+	if snapshot := v.cache.snapshot(); now.Before(snapshot.retryAfter) {
+		if v.canUseStale(now, snapshot) {
+			return snapshot.networks, true, nil
+		}
+		return nil, false, fmt.Errorf("ip range refresh failed: %s", snapshot.lastError)
+	}
+
 	networks, err := v.fetchAndStore(ctx)
 	if err != nil {
 		stale := v.cache.snapshot()
@@ -114,7 +144,7 @@ func (v *ipRangesVerifier) fetchAndStore(ctx context.Context) ([]*net.IPNet, err
 		now := time.Now()
 		networks, fetchErr := v.fetchNetworks(ctx)
 		if fetchErr != nil {
-			v.cache.setError(fetchErr)
+			v.cache.setError(fetchErr, now.Add(fetchBackoff))
 			return nil, fetchErr
 		}
 		v.cache.set(networks, now, now.Add(v.refresh))
@@ -189,58 +219,97 @@ func (v *ipRangesVerifier) fetchNetworks(ctx context.Context) ([]*net.IPNet, err
 		if err != nil {
 			return nil, err
 		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "crawlwall/"+version.Version)
 
 		resp, err := v.client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("fetch %s: %w", source, err)
 		}
 
-		body, readErr := io.ReadAll(resp.Body)
+		// Check the status before reading: there is no reason to pull megabytes
+		// off a 500 page.
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("fetch %s: unexpected status %d", source, resp.StatusCode)
+		}
+
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxSourceBytes+1))
 		_ = resp.Body.Close()
 		if readErr != nil {
 			return nil, fmt.Errorf("read %s: %w", source, readErr)
 		}
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return nil, fmt.Errorf("fetch %s: unexpected status %d", source, resp.StatusCode)
+		if len(body) > maxSourceBytes {
+			return nil, fmt.Errorf("read %s: document exceeds %d bytes", source, maxSourceBytes)
 		}
 
-		parsed, err := parseCIDRsFromJSON(body)
+		parsed, rejected, err := parseCIDRsFromJSON(body)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", source, err)
+		}
+		if rejected > 0 {
+			v.logger.Warn("crawlwall ip range source published overly broad prefixes",
+				zap.String("source", source),
+				zap.Int("rejected", rejected),
+			)
 		}
 		networks = append(networks, parsed...)
 	}
 	return networks, nil
 }
 
-func parseCIDRsFromJSON(data []byte) ([]*net.IPNet, error) {
+// parseCIDRsFromJSON walks an arbitrary JSON document and collects every string
+// that parses as a CIDR or bare IP, which covers the shapes the major crawler
+// operators publish without hard-coding each one. It also reports how many
+// entries were dropped for being too broad to be a credible bot range.
+func parseCIDRsFromJSON(data []byte) ([]*net.IPNet, int, error) {
 	var value any
 	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var cidrs []*net.IPNet
-	collectCIDRs(value, &cidrs)
+	rejected := 0
+	collectCIDRs(value, &cidrs, &rejected)
 	if len(cidrs) == 0 {
-		return nil, fmt.Errorf("no CIDRs found in source document")
+		return nil, rejected, fmt.Errorf("no usable CIDRs found in source document")
 	}
-	return cidrs, nil
+	return cidrs, rejected, nil
 }
 
-func collectCIDRs(value any, cidrs *[]*net.IPNet) {
+func collectCIDRs(value any, cidrs *[]*net.IPNet, rejected *int) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for _, item := range typed {
-			collectCIDRs(item, cidrs)
+			collectCIDRs(item, cidrs, rejected)
 		}
 	case []any:
 		for _, item := range typed {
-			collectCIDRs(item, cidrs)
+			collectCIDRs(item, cidrs, rejected)
 		}
 	case string:
-		if network := parseNetworkString(typed); network != nil {
+		network := parseNetworkString(typed)
+		switch {
+		case network == nil:
+		case !credibleNetwork(network):
+			*rejected++
+		default:
 			*cidrs = append(*cidrs, network)
 		}
+	}
+}
+
+// credibleNetwork rejects prefixes broad enough that accepting them would
+// verify most of the internet as the bot, such as 0.0.0.0/0.
+func credibleNetwork(network *net.IPNet) bool {
+	ones, bits := network.Mask.Size()
+	switch bits {
+	case 0:
+		return false // non-contiguous mask
+	case 32:
+		return ones >= minIPv4PrefixBits
+	default:
+		return ones >= minIPv6PrefixBits
 	}
 }
 

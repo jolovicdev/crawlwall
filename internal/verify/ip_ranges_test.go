@@ -12,7 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
 )
 
 func TestIPRangesVerifierFailsClosedWhenExpiredRefreshFails(t *testing.T) {

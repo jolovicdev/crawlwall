@@ -1,4 +1,4 @@
-module github.com/jolovicdev/crawlwall
+module github.com/jolovicdev/crawlwall/v2
 
 go 1.26.2
 

@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/jolovicdev/crawlwall/internal/lru"
+	"github.com/jolovicdev/crawlwall/v2/internal/lru"
 )
 
 const (

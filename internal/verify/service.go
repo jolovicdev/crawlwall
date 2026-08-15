@@ -10,8 +10,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/jolovicdev/crawlwall/internal/bot"
-	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/bot"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
 )
 
 // VerifyTimeout bounds one request-path verification, including any inline

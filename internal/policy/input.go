@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jolovicdev/crawlwall/internal/bot"
+	"github.com/jolovicdev/crawlwall/v2/internal/bot"
 )
 
 type Input struct {

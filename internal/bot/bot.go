@@ -1,6 +1,6 @@
 package bot
 
-import "github.com/jolovicdev/crawlwall/internal/config"
+import "github.com/jolovicdev/crawlwall/v2/internal/config"
 
 type Identified struct {
 	ID         string

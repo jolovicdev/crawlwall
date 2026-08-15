@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jolovicdev/crawlwall/internal/config"
-	"github.com/jolovicdev/crawlwall/internal/policy"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/policy"
 )
 
 func TestGenerateDerivesGroupsFromPolicy(t *testing.T) {

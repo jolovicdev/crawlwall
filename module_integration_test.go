@@ -15,13 +15,13 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
 
-	"github.com/jolovicdev/crawlwall/internal/bot"
-	"github.com/jolovicdev/crawlwall/internal/config"
-	"github.com/jolovicdev/crawlwall/internal/ledger"
-	"github.com/jolovicdev/crawlwall/internal/policy"
-	"github.com/jolovicdev/crawlwall/internal/ratelimit"
-	"github.com/jolovicdev/crawlwall/internal/receipt"
-	"github.com/jolovicdev/crawlwall/internal/verify"
+	"github.com/jolovicdev/crawlwall/v2/internal/bot"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/ledger"
+	"github.com/jolovicdev/crawlwall/v2/internal/policy"
+	"github.com/jolovicdev/crawlwall/v2/internal/ratelimit"
+	"github.com/jolovicdev/crawlwall/v2/internal/receipt"
+	"github.com/jolovicdev/crawlwall/v2/internal/verify"
 )
 
 type testNextHandler func(http.ResponseWriter, *http.Request) error

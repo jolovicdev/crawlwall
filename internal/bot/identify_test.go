@@ -3,7 +3,7 @@ package bot
 import (
 	"testing"
 
-	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
 )
 
 func TestIdentifyFallsBackToDefaultBot(t *testing.T) {

@@ -3,7 +3,7 @@ package policy
 import (
 	"testing"
 
-	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
 )
 
 func TestEvaluateReturnsMeteredDecisionForVerifiedTrainingBotOnProtectedPath(t *testing.T) {

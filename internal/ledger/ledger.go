@@ -13,11 +13,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/jolovicdev/crawlwall/internal/bot"
-	"github.com/jolovicdev/crawlwall/internal/config"
-	"github.com/jolovicdev/crawlwall/internal/policy"
-	"github.com/jolovicdev/crawlwall/internal/receipt"
-	"github.com/jolovicdev/crawlwall/internal/verify"
+	"github.com/jolovicdev/crawlwall/v2/internal/bot"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/policy"
+	"github.com/jolovicdev/crawlwall/v2/internal/receipt"
+	"github.com/jolovicdev/crawlwall/v2/internal/verify"
 )
 
 type EventWriter interface {

@@ -13,7 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/jolovicdev/crawlwall/internal/config"
+	"github.com/jolovicdev/crawlwall/v2/internal/config"
 )
 
 // A source that publishes a wildcard prefix would verify every client on earth

@@ -194,3 +194,16 @@ func meteredTestEvent(id string, ts time.Time, botID string) Event {
 	event.PriceUnit = ptrString("request")
 	return event
 }
+
+// The URL form percent-encodes reserved characters, but the go-sql-driver DSN
+// takes credentials literally. The conversion must hand the driver the decoded
+// password or authentication fails for any password with a reserved character.
+func TestMySQLConnStringDecodesCredentials(t *testing.T) {
+	got, err := mysqlConnString("mysql://cw:p%40ss%2Fw%25rd@db.internal/crawlwall")
+	if err != nil {
+		t.Fatalf("mysqlConnString() error = %v", err)
+	}
+	if !strings.HasPrefix(got, "cw:p@ss/w%rd@tcp(db.internal:3306)/crawlwall?") {
+		t.Fatalf("mysqlConnString() = %q, want the decoded password", got)
+	}
+}

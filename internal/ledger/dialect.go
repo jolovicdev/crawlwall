@@ -197,9 +197,16 @@ func mysqlConnString(dsn string) (string, error) {
 		return "", fmt.Errorf("mysql ledger DSN requires a database name")
 	}
 
+	// The go-sql-driver DSN is not a URL: user and password are taken
+	// literally, with no percent-decoding. Re-encoding them via User.String()
+	// would send a password like p@ss to the server as p%40ss.
 	credentials := ""
 	if parsed.User != nil {
-		credentials = parsed.User.String() + "@"
+		credentials = parsed.User.Username()
+		if password, ok := parsed.User.Password(); ok {
+			credentials += ":" + password
+		}
+		credentials += "@"
 	}
 
 	host := parsed.Host

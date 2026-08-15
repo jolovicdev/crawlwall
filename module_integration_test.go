@@ -288,7 +288,7 @@ version: crawlwall.io/v1
 site:
   id: test-site
   host: localhost
-  mode: ` + mode + `
+  mode: `+mode+`
 
 runtime:
   fail_mode: block
@@ -311,7 +311,7 @@ bots:
     verify:
       type: ip_ranges
       sources:
-        - "` + rangesURL + `"
+        - "`+rangesURL+`"
       refresh: 1h
       stale_action: fail_closed
       max_stale: 0s
@@ -561,7 +561,7 @@ bots:
     verify:
       type: ip_ranges
       sources:
-        - "` + rangesURL + `"
+        - "`+rangesURL+`"
       refresh: 1h
   - id: unknown
     name: Unknown
@@ -761,7 +761,7 @@ func newTestModuleWithPolicy(t *testing.T, ipRangesResponse string, buildPolicy 
 		t.Fatalf("LoadPublicKeyFile() error = %v", err)
 	}
 
-	return &Crawlwall{
+	mod := &Crawlwall{
 		logger:   zap.NewNop(),
 		config:   cfg,
 		bots:     bot.NewIdentifier(cfg.Bots),
@@ -770,7 +770,8 @@ func newTestModuleWithPolicy(t *testing.T, ipRangesResponse string, buildPolicy 
 		ledger:   led,
 		limiter:  ratelimit.New(),
 		signer:   signer,
-	}, publicKey
+	}
+	return mod, publicKey
 }
 
 func exportedRecords(t *testing.T, mod *Crawlwall) []ledger.ExportRecord {
@@ -802,5 +803,102 @@ func closeLedger(t *testing.T, mod *Crawlwall) {
 		if err := mod.ledger.Close(); err != nil {
 			t.Fatalf("ledger.Close() error = %v", err)
 		}
+	}
+}
+
+// Shadow mode exists to answer "what would enforcing do". Skipping the limiter
+// there reported every over-limit request as allowed, which made `ledger report`
+// show zero would-block for rate_limit rules.
+func TestServeHTTPShadowModeRecordsRateLimitWouldBlock(t *testing.T) {
+	mod, _ := newTestModuleWithPolicy(t, `{"prefixes":[{"ipv4Prefix":"20.125.66.80/28"}]}`, func(keyPath, rangesURL string) string {
+		return strings.TrimSpace(`
+version: crawlwall.io/v1
+
+site:
+  id: test-site
+  host: localhost
+  mode: shadow
+
+runtime:
+  fail_mode: allow
+  default_action:
+    type: allow
+
+ledger:
+  enabled: true
+
+receipts:
+  enabled: false
+
+bots:
+  - id: gptbot
+    name: GPTBot
+    class: ai_training
+    match:
+      user_agents:
+        - "GPTBot"
+    verify:
+      type: ip_ranges
+      sources:
+        - "`+rangesURL+`"
+      refresh: 1h
+  - id: unknown
+    name: Unknown
+    class: unknown
+    match:
+      default: true
+    verify:
+      type: none
+
+rules:
+  - id: rate_limit_ai_training
+    priority: 300
+    when: >
+      bot.verified && bot.class == "ai_training"
+    action:
+      type: rate_limit
+      limit:
+        key: "bot.id"
+        rpm: 5
+`) + "\n"
+	})
+	defer closeLedger(t, mod)
+
+	const requests = 40
+	for i := 0; i < requests; i++ {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "http://localhost/public/a", nil)
+		request.Header.Set("User-Agent", "GPTBot/1.1")
+		request.RemoteAddr = "20.125.66.81:1234"
+
+		called := false
+		if err := mod.ServeHTTP(recorder, request, testNextHandler(func(w http.ResponseWriter, r *http.Request) error {
+			called = true
+			w.WriteHeader(http.StatusOK)
+			return nil
+		})); err != nil {
+			t.Fatalf("ServeHTTP() iteration %d error = %v", i, err)
+		}
+		if !called || recorder.Code != http.StatusOK {
+			t.Fatalf("iteration %d: shadow mode must not enforce (called=%t, status=%d)", i, called, recorder.Code)
+		}
+	}
+
+	records := exportedRecords(t, mod)
+	if len(records) != requests {
+		t.Fatalf("len(records) = %d, want %d", len(records), requests)
+	}
+
+	wouldBlock := 0
+	for _, record := range records {
+		if record.Event.Action == "rate_limit_exceeded" {
+			if record.Event.Enforced {
+				t.Fatalf("shadow mode must not mark an event enforced")
+			}
+			wouldBlock++
+		}
+	}
+	if wouldBlock == 0 {
+		t.Fatalf("no rate_limit_exceeded records: shadow mode did not evaluate the limiter")
 	}
 }

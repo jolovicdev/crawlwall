@@ -87,7 +87,7 @@ func actionWithOwnedLimit(action config.Action) config.Action {
 func (e *Engine) DefaultDecision() Decision {
 	return Decision{
 		RuleID: "runtime.default_action",
-		Action: e.normalizedAction(e.defaultAction),
+		Action: actionWithOwnedLimit(e.normalizedAction(e.defaultAction)),
 	}
 }
 

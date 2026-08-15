@@ -38,6 +38,14 @@ correctness and hot-path fixes.
 - Bounded-cache eviction reclaims a batch instead of one entry per insert. Under
   a flood of unique keys, every request past the cap used to pay a full map scan
   while holding the lock.
+- A `runtime.default_action` of type `rate_limit` no longer shares one Limit
+  across every request that falls through to it, which was a data race and could
+  rate-limit the wrong bucket under concurrency.
+- MySQL ledger passwords containing URL-reserved characters (written
+  percent-encoded in the `mysql://` DSN) now reach the server decoded instead of
+  failing authentication.
+- User-agent needles containing non-ASCII letters match case-insensitively
+  again, as they did before the allocation-free matcher.
 
 ### Added
 

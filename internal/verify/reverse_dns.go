@@ -4,22 +4,18 @@ import (
 	"context"
 	"errors"
 	"net"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/jolovicdev/crawlwall/internal/lru"
 )
 
 const (
 	reverseDNSCacheTTL        = 5 * time.Minute
 	reverseDNSCacheMaxEntries = 4096
-
-	// evictBatchDivisor sets how much headroom one eviction pass reclaims:
-	// maxEntries/evictBatchDivisor entries, so the scan cost amortizes over
-	// that many subsequent inserts.
-	evictBatchDivisor = 8
 )
 
 type dnsResolver interface {
@@ -195,10 +191,8 @@ func (c *reverseDNSCache) set(key string, result Result) {
 	}
 }
 
-// evict drops expired entries, then the least recently used ones, until the
-// cache is back under its low-water mark. A crawler flood from many spoofed IPs
-// holds the cache at its cap, so evicting a batch keeps the amortized cost per
-// insert constant instead of scanning the whole map on every miss.
+// evict drops expired entries, then trims the least recently used ones. A
+// crawler flood from many spoofed IPs holds the cache at its cap; see lru.Trim.
 func (c *reverseDNSCache) evict(now time.Time) {
 	for key, entry := range c.items {
 		if now.After(entry.expiresAt) {
@@ -206,21 +200,7 @@ func (c *reverseDNSCache) evict(now time.Time) {
 		}
 	}
 
-	surplus := len(c.items) - (c.maxEntries - c.maxEntries/evictBatchDivisor)
-	if surplus <= 0 {
-		return
-	}
-
-	access := make([]time.Time, 0, len(c.items))
-	for _, entry := range c.items {
-		access = append(access, entry.lastAccess)
-	}
-	slices.SortFunc(access, func(a, b time.Time) int { return a.Compare(b) })
-
-	cutoff := access[surplus-1]
-	for key, entry := range c.items {
-		if !entry.lastAccess.After(cutoff) {
-			delete(c.items, key)
-		}
-	}
+	lru.Trim(c.items, c.maxEntries, func(entry reverseDNSCacheEntry) time.Time {
+		return entry.lastAccess
+	})
 }

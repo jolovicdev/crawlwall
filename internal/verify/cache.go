@@ -15,9 +15,10 @@ type rangeCache struct {
 	retryAfter time.Time
 }
 
-// get returns the cached networks without copying them. set installs a private
-// copy and never mutates it afterwards, so the returned slice is safe to read
-// concurrently; copying it here would allocate one slice per request.
+// get returns the cached networks without copying them. Every set installs a
+// freshly built slice that is never mutated afterwards, so the returned slice
+// is safe to read concurrently; copying it here would allocate one slice per
+// request.
 func (c *rangeCache) get(now time.Time) ([]*net.IPNet, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

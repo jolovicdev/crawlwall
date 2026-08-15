@@ -26,6 +26,15 @@ func compileRules(env *cel.Env, rules []config.RuleConfig) ([]compiledRule, erro
 			return nil, fmt.Errorf("compile rule %s: %w", rule.ID, issues.Err())
 		}
 
+		// A rule that is not a boolean never matches, so a typo such as
+		// `when: request.path` would silently disable a block rule. Inputs are
+		// dyn-typed maps, so `bot.verified` checks as dyn and can only be
+		// caught at evaluation time; anything statically non-boolean is
+		// rejected here.
+		if out := ast.OutputType(); !out.IsAssignableType(cel.BoolType) && out != cel.DynType {
+			return nil, fmt.Errorf("compile rule %s: when must evaluate to a boolean, got %s", rule.ID, out)
+		}
+
 		program, err := env.Program(ast)
 		if err != nil {
 			return nil, fmt.Errorf("program rule %s: %w", rule.ID, err)

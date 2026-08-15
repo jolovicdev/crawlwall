@@ -63,6 +63,13 @@ func (c *Config) Validate() error {
 		if !bot.Match.Default && len(bot.Match.UserAgents) == 0 {
 			return fmt.Errorf("bot %q: at least one match.user_agents entry is required", bot.ID)
 		}
+		for _, needle := range bot.Match.UserAgents {
+			// An empty needle is a substring of every user agent, so it would
+			// silently claim all traffic for this bot.
+			if strings.TrimSpace(needle) == "" {
+				return fmt.Errorf("bot %q: match.user_agents entries must not be empty", bot.ID)
+			}
+		}
 		switch bot.Verify.Type {
 		case "none":
 		case "reverse_dns":

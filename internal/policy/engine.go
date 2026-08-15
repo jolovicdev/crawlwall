@@ -53,7 +53,12 @@ func (e *Engine) Evaluate(input Input) (Decision, error) {
 		}
 
 		matched, ok := out.Value().(bool)
-		if !ok || !matched {
+		if !ok {
+			// Treating a non-boolean as "no match" would silently skip the
+			// rule; surface it so fail_mode decides instead.
+			return Decision{}, fmt.Errorf("evaluate rule %s: when returned %T, want bool", rule.ID, out.Value())
+		}
+		if !matched {
 			continue
 		}
 

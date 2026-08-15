@@ -56,6 +56,26 @@ Start production policy changes in `shadow`, inspect the ledger, then switch to
 that would have blocked is recorded but the request is served; those show up as
 `Would block` in `ledger report`, separate from real `Blocked` counts.
 
+Rate limits are evaluated in the dry-run modes too, so their buckets fill exactly
+as they would under `enforce` and the `Would block` count is the number of
+requests a real rollout would have answered with `429`.
+
+### robots.txt
+
+`robots:` turns the policy into the advisory file crawlers read first:
+
+```yaml
+robots:
+  serve: true
+  sitemaps:
+    - "https://example.com/sitemap.xml"
+```
+
+The directives are derived by evaluating these rules, not by parsing them, so
+the file always agrees with enforcement. Rules keyed on inputs robots.txt cannot
+express are reported at startup instead of being silently dropped. See the
+README for the full translation table.
+
 ### Verifier failures
 
 When a verifier cannot complete, for example a reverse DNS timeout or an

@@ -6,9 +6,21 @@ type Config struct {
 	Runtime  RuntimeConfig  `yaml:"runtime"`
 	Ledger   LedgerConfig   `yaml:"ledger"`
 	Receipts ReceiptsConfig `yaml:"receipts"`
+	Robots   RobotsConfig   `yaml:"robots"`
 	Bots     []BotConfig    `yaml:"bots"`
 	Sets     map[string]any `yaml:"sets"`
 	Rules    []RuleConfig   `yaml:"rules"`
+}
+
+// RobotsConfig controls the generated robots.txt. The directives themselves are
+// derived from the policy; only what the policy cannot know is configured here.
+type RobotsConfig struct {
+	// Serve makes the handler answer /robots.txt from the live policy, which is
+	// what keeps the advisory layer from drifting out of sync with enforcement.
+	Serve bool `yaml:"serve"`
+
+	// Sitemaps are emitted verbatim as Sitemap: lines.
+	Sitemaps []string `yaml:"sitemaps"`
 }
 
 type SiteConfig struct {

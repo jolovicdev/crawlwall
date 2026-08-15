@@ -90,9 +90,16 @@ func ResolvePath(vars map[string]any, path string) string {
 }
 
 func DefaultLabelsInput(identified bot.Identified, r *http.Request) map[string]any {
+	return LabelsFor(identified.ID, r.Host, r.URL.Path)
+}
+
+// LabelsFor builds the labels input without a live request, so callers that
+// evaluate policy offline (robots.txt generation, `policy eval`) produce the
+// same shape the request path does.
+func LabelsFor(botID, host, path string) map[string]any {
 	return map[string]any{
-		"bot_id": identified.ID,
-		"host":   r.Host,
-		"path":   r.URL.Path,
+		"bot_id": botID,
+		"host":   host,
+		"path":   path,
 	}
 }

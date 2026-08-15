@@ -116,3 +116,33 @@ func TestEvaluateReturnsErrorForRuntimeCELError(t *testing.T) {
 		t.Fatalf("Evaluate() error = nil, want runtime CEL error")
 	}
 }
+
+// The default decision is handed to every request that no rule matches, so its
+// Limit must be private per decision for the same reason a matched rule's is:
+// ServeHTTP resolves Limit.ResolvedKey per request, and a shared pointer would
+// race and bleed one request's bucket key into another.
+func TestDefaultDecisionOwnsItsRateLimit(t *testing.T) {
+	engine, err := NewEngine(&config.Config{
+		Runtime: config.RuntimeConfig{DefaultAction: config.Action{
+			Type:  config.ActionRateLimit,
+			Limit: &config.Limit{Key: "request.ip", RPM: 10},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEngine() error = %v", err)
+	}
+
+	first, err := engine.Evaluate(Input{Request: RequestInput{IP: "203.0.113.1"}})
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	second, err := engine.Evaluate(Input{Request: RequestInput{IP: "203.0.113.2"}})
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+
+	first.Action.Limit.ResolvedKey = "203.0.113.1"
+	if second.Action.Limit.ResolvedKey != "" {
+		t.Fatalf("second decision's ResolvedKey = %q, want empty: the default decision must own its Limit", second.Action.Limit.ResolvedKey)
+	}
+}

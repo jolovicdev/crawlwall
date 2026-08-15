@@ -1,22 +1,18 @@
 package ratelimit
 
 import (
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/jolovicdev/crawlwall/internal/lru"
 )
 
 const (
 	defaultMaxEntries = 16384
 	defaultEntryTTL   = 10 * time.Minute
-
-	// evictBatchDivisor sets how much headroom one eviction pass reclaims:
-	// maxEntries/evictBatchDivisor entries, so the scan cost amortizes over
-	// that many subsequent inserts.
-	evictBatchDivisor = 8
 )
 
 type limiterEntry struct {
@@ -74,15 +70,10 @@ func (l *Limiter) allowAt(key string, rpm int, now time.Time) bool {
 	return limiter.AllowN(now, 1)
 }
 
-// evictIdle drops entries that have not been used within the TTL, then evicts
-// the least recently used entries until the map is back under its low-water
-// mark. Without this, a high-cardinality key such as request.ip would grow the
-// map without bound.
-//
-// Eviction is batched rather than trimming a single entry per insert: a flood
-// of unique keys keeps the map permanently at its cap, and evicting one at a
-// time would make every request past the cap pay a full scan while holding the
-// lock. Callers must hold l.mu.
+// evictIdle drops entries that have not been used within the TTL, then trims
+// the least recently used ones. Without this, a high-cardinality key such as
+// request.ip would grow the map without bound; see lru.Trim for why a batch is
+// reclaimed. Callers must hold l.mu.
 func (l *Limiter) evictIdle(now time.Time) {
 	for key, entry := range l.entries {
 		if now.Sub(entry.lastAccess) > l.ttl {
@@ -90,22 +81,7 @@ func (l *Limiter) evictIdle(now time.Time) {
 		}
 	}
 
-	target := l.maxEntries - l.maxEntries/evictBatchDivisor
-	surplus := len(l.entries) - target
-	if surplus <= 0 {
-		return
-	}
-
-	access := make([]time.Time, 0, len(l.entries))
-	for _, entry := range l.entries {
-		access = append(access, entry.lastAccess)
-	}
-	slices.SortFunc(access, func(a, b time.Time) int { return a.Compare(b) })
-
-	cutoff := access[surplus-1]
-	for key, entry := range l.entries {
-		if !entry.lastAccess.After(cutoff) {
-			delete(l.entries, key)
-		}
-	}
+	lru.Trim(l.entries, l.maxEntries, func(entry limiterEntry) time.Time {
+		return entry.lastAccess
+	})
 }
